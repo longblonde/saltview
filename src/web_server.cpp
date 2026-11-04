@@ -301,6 +301,12 @@ void begin() {
   server.on("/api/notifications", HTTP_GET, handleNotifications);
   server.on("/api/notifications", HTTP_POST, handleNotificationsPost);
   server.on("/api/wifi/scan", HTTP_GET, [] { server.send(200, "application/json", WifiMgr::scanJson()); });
+  server.on("/api/wifi/status", HTTP_GET, [] {
+    JsonDocument doc;
+    doc["ssid"] = WifiMgr::savedSsid();
+    doc["error"] = WifiMgr::lastError();
+    sendJson(200, doc);
+  });
   server.on("/api/wifi", HTTP_POST, handleWifiSave);
   server.on("/api/wifi/forget", HTTP_POST, [] {
     WifiMgr::forget();

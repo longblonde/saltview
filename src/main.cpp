@@ -173,7 +173,8 @@ void setup() {
   if (!gDisplay.awake()) gDisplay.showNow("WIFI");
   WifiMgr::begin(hostname());
   if (WifiMgr::mode() == WifiMgr::Mode::Portal) {
-    gDisplay.setOverride("SETUP - JOIN " + WifiMgr::apName());
+    String prefix = WifiMgr::lastError().isEmpty() ? "SETUP" : "WIFI FAILED";
+    gDisplay.setOverride(prefix + " - JOIN " + WifiMgr::apName());
     gDisplay.wake();
   } else {
     configTzTime(gConfig.tz.c_str(), "pool.ntp.org", "time.nist.gov");

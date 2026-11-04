@@ -16,12 +16,14 @@ label{display:block;font-size:14px;color:var(--muted);margin:12px 0 4px}
 input{width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:16px}
 button{width:100%;margin-top:16px;padding:12px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-size:16px;cursor:pointer}
 .row{display:flex;gap:8px;align-items:center;margin-top:8px;font-size:14px;color:var(--muted)}.row input{width:auto}
+.err{border-color:#cf222e;color:#cf222e}
 </style></head><body><main>
 <h1>SaltView Wi-Fi setup</h1><p>Pick your home network. The device will reboot and join it.</p>
+<div class="card err" id="err" hidden></div>
 <div class="card"><ul id="nets"><li>Scanning&hellip;</li></ul></div>
 <form class="card" id="f">
-<label for="ssid">Network name</label><input id="ssid" required maxlength="32">
-<label for="pass">Password</label><input id="pass" type="password" maxlength="64">
+<label for="ssid">Network name</label><input id="ssid" required maxlength="32" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off">
+<label for="pass">Password</label><input id="pass" type="password" maxlength="64" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="off">
 <div class="row"><input type="checkbox" id="show"><span>Show password</span></div>
 <button>Save and connect</button></form>
 <p id="msg"></p>
@@ -38,6 +40,10 @@ async function scan(){
     li.firstChild.textContent=n.ssid;li.onclick=()=>{$('#ssid').value=n.ssid;$('#pass').focus()};
     $('#nets').appendChild(li)});
 }
+fetch('/api/wifi/status').then(r=>r.json()).then(s=>{
+  if(s.ssid)$('#ssid').value=s.ssid;
+  if(s.error){$('#err').hidden=false;$('#err').textContent=`Couldn't join "${s.ssid}": ${s.error}.`}
+}).catch(()=>{});
 $('#show').onchange=e=>$('#pass').type=e.target.checked?'text':'password';
 $('#f').onsubmit=async e=>{e.preventDefault();
   const r=await fetch('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},

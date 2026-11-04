@@ -6,13 +6,34 @@
 #include <WiFi.h>
 
 namespace WifiMgr {
-static constexpr uint32_t kConnectTimeoutMs = 20000;
+static constexpr uint32_t kConnectTimeoutMs = 30000;
 static constexpr uint32_t kPortalTimeoutMs = 10 * 60 * 1000;  // then retry saved network
 
 static Mode sMode = Mode::Connecting;
 static DNSServer sDns;
-static String sAp, sSsid;
+static String sAp, sSsid, sLastError;
 static uint32_t sPortalSince = 0;
+static volatile uint8_t sDisconnectReason = 0;
+static volatile bool sAssociated = false;
+
+static const char* reasonText(uint8_t reason) {
+  switch (reason) {
+    case WIFI_REASON_NO_AP_FOUND:
+      return "network not found - check the name (it's case-sensitive) and that it's 2.4 GHz";
+    case WIFI_REASON_AUTH_FAIL:
+    case WIFI_REASON_AUTH_EXPIRE:
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:
+      return "wrong password, or the network's security mode isn't supported";
+    case WIFI_REASON_ASSOC_FAIL:
+    case WIFI_REASON_ASSOC_TOOMANY:
+      return "the router refused the connection";
+    case WIFI_REASON_BEACON_TIMEOUT:
+      return "signal too weak";
+    default:
+      return "timed out";
+  }
+}
 
 static void startPortal() {
   sMode = Mode::Portal;
@@ -46,6 +67,23 @@ void begin(const String& hostname) {
     return;
   }
 
+  WiFi.onEvent(
+      [](WiFiEvent_t, WiFiEventInfo_t info) {
+        sDisconnectReason = info.wifi_sta_disconnected.reason;
+        Serial.printf("[wifi] disconnected, reason %u\n", sDisconnectReason);
+      },
+      ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+  WiFi.onEvent(
+      [](WiFiEvent_t, WiFiEventInfo_t) {
+        sAssociated = true;
+        Serial.println("[wifi] associated, waiting for DHCP");
+      },
+      ARDUINO_EVENT_WIFI_STA_CONNECTED);
+  // Lengths only, never the password itself: catches stray spaces and autocorrected input.
+  Serial.printf("[wifi] joining \"%s\" (ssid %u chars, password %u chars%s)\n", sSsid.c_str(), sSsid.length(),
+                pass.length(), (pass.length() && (isspace(pass[0]) || isspace(pass[pass.length() - 1])))
+                                   ? ", leading/trailing space!"
+                                   : "");
   WiFi.setHostname(hostname.c_str());
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
@@ -53,7 +91,11 @@ void begin(const String& hostname) {
   uint32_t t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < kConnectTimeoutMs) delay(100);
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.printf("[wifi] could not join \"%s\"\n", sSsid.c_str());
+    sLastError = (sAssociated && WiFi.isConnected())
+                     ? "joined the network but the router gave no IP address (DHCP)"
+                     : reasonText(sDisconnectReason);
+    Serial.printf("[wifi] could not join \"%s\": %s (reason %u)\n", sSsid.c_str(), sLastError.c_str(),
+                  sDisconnectReason);
     startPortal();
     return;
   }
@@ -71,6 +113,8 @@ void loop() {
 
 Mode mode() { return sMode; }
 String apName() { return sAp; }
+String savedSsid() { return sSsid; }
+String lastError() { return sLastError; }
 
 String ip() {
   if (sMode == Mode::Portal) return WiFi.softAPIP().toString();
