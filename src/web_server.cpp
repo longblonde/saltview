@@ -240,9 +240,13 @@ static void handleDisplayRender() {
   JsonDocument doc;
   JsonArray arr = doc["items"].to<JsonArray>();
   for (const auto& it : items) {
-    JsonObject o = arr.add<JsonObject>();
-    o["label"] = it.label;
-    o["text"] = DisplayManager::renderItem(it, gDisplay.data);
+    JsonArray cards = arr.add<JsonObject>()["cards"].to<JsonArray>();
+    for (const auto& c : DisplayManager::itemCards(it, gDisplay.data)) {
+      JsonObject j = cards.add<JsonObject>();
+      j["text"] = c.text;
+      j["ms"] = DisplayManager::cardMs(c);  // includes scroll time
+      if (c.marquee) j["marquee"] = true;
+    }
   }
   sendJson(200, doc);
 }

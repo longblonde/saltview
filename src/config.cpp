@@ -45,7 +45,7 @@ bool itemFromJson(JsonObjectConst in, DisplayItem& it) {
   it.enabled = in["enabled"] | true;
   it.seconds = constrain((int)(in["seconds"] | 3), 1, 60);
   it.label = String(in["label"] | "").substring(0, 4);
-  it.text = String(in["text"] | "").substring(0, 64);
+  it.text = it.type == ItemType::Custom ? String(in["text"] | "").substring(0, 64) : String();
   return true;
 }
 
@@ -70,6 +70,8 @@ void configToJson(const Config& c, JsonObject o) {
   o["color"] = c.color;
   o["brightness"] = c.brightness;
   o["awakeSec"] = c.awakeSec;
+  o["blankMs"] = c.blankMs;
+  o["scrollMs"] = c.scrollMs;
   JsonArray items = o["items"].to<JsonArray>();
   for (const auto& it : c.items) {
     JsonObject j = items.add<JsonObject>();
@@ -101,6 +103,8 @@ bool configFromJson(JsonObjectConst in, Config& c, String& err) {
   take(in, "color", c.color);
   take(in, "brightness", c.brightness);
   take(in, "awakeSec", c.awakeSec);
+  take(in, "blankMs", c.blankMs);
+  take(in, "scrollMs", c.scrollMs);
   take(in, "notifyLow", c.notifyLow);
   take(in, "notifyRefill", c.notifyRefill);
   take(in, "ntfyServer", c.ntfyServer);
@@ -144,6 +148,8 @@ bool configFromJson(JsonObjectConst in, Config& c, String& err) {
   c.integration = constrain(c.integration, 0, 5);
   c.brightness = constrain(c.brightness, 0, 15);
   c.awakeSec = constrain(c.awakeSec, 5, 600);
+  c.blankMs = constrain(c.blankMs, 0, 3000);
+  c.scrollMs = constrain(c.scrollMs, 50, 1000);
   return true;
 }
 

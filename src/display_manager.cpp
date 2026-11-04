@@ -7,6 +7,7 @@ namespace {
 constexpr uint32_t kScrollStepMs = 220;
 constexpr uint32_t kScrollPauseMs = 700;
 constexpr uint32_t kLabelMs = 900;
+constexpr uint32_t kOctetMs = 1000;
 constexpr uint32_t kFrameMs = 30;
 
 struct Cell {
@@ -76,15 +77,15 @@ void DisplayManager::wake() {
 
 void DisplayManager::sleep() {
   _awake = false;
-  if (!_flashUntil) power(false);
+  if (!flashing()) power(false);
 }
 
-void DisplayManager::flash(const String& text, uint32_t ms) {
-  if (!_ok) return;
+void DisplayManager::play(const std::vector<Card>& cards) {
+  if (!_ok || cards.empty()) return;
   power(true);
-  _flashText = text;
+  _flash = cards;
+  _flashIdx = 0;
   _flashStart = millis();
-  _flashUntil = _flashStart + max(ms, textDuration(text));
 }
 
 void DisplayManager::showNow(const String& text) {
@@ -98,18 +99,52 @@ uint32_t DisplayManager::textDuration(const String& text) {
   return n <= 4 ? 0 : 2 * kScrollPauseMs + (n - 4) * kScrollStepMs;
 }
 
-void DisplayManager::drawText(const String& text, uint32_t elapsed) {
-  auto cells = toCells(text);
+// A marquee runs from blank (text entering on the right) to blank (text gone off the left).
+static String marqueeText(const String& text) { return "    " + text + "    "; }
+
+uint32_t DisplayManager::cardMs(const Card& c) {
+  if (c.marquee) return (toCells(marqueeText(c.text)).size() - 4) * gConfig.scrollMs;
+  return max(c.ms, textDuration(c.text));
+}
+
+std::vector<DisplayManager::Card> DisplayManager::ipCards(const String& ip) {
+  std::vector<Card> cards{{"IP", kLabelMs}};
+  int start = 0;
+  for (int dot; (dot = ip.indexOf('.', start)) >= 0; start = dot + 1)
+    cards.push_back({ip.substring(start, dot + 1), kOctetMs});  // keep the '.' as a decimal point
+  cards.push_back({ip.substring(start), kOctetMs});
+  return cards;
+}
+
+std::vector<DisplayManager::Card> DisplayManager::itemCards(const DisplayItem& it, const DisplayData& d) {
+  std::vector<Card> cards;
+  if (!it.label.isEmpty()) cards.push_back({it.label, kLabelMs});
+  if (it.type == ItemType::Ip && !d.ip.isEmpty()) {
+    auto ip = ipCards(d.ip);
+    if (!it.label.isEmpty()) ip.erase(ip.begin());  // a custom label replaces the "IP" card
+    cards.insert(cards.end(), ip.begin(), ip.end());
+  } else if (it.type == ItemType::Custom) {
+    cards.push_back({it.text, 0, true});  // duration is the scroll itself, not it.seconds
+  } else {
+    cards.push_back({renderItem(it, d), it.seconds * 1000UL});
+  }
+  return cards;
+}
+
+void DisplayManager::drawText(const String& text, uint32_t elapsed, bool marquee) {
+  auto cells = toCells(marquee ? marqueeText(text) : text);
   int n = cells.size();
   int offset = 0;
-  if (n > 4) {
+  if (marquee) {
+    offset = min<long>(n - 4, elapsed / gConfig.scrollMs);
+  } else if (n > 4) {
     long t = (long)elapsed - (long)kScrollPauseMs;
     offset = t <= 0 ? 0 : min<long>(n - 4, t / kScrollStepMs);
   }
 
   char frame[9];
   for (int i = 0; i < 4; i++) {
-    int k = n <= 4 ? i - (4 - n) : i + offset;  // short text is right-aligned
+    int k = (n <= 4 && !marquee) ? i - (4 - n) : i + offset;  // short text is right-aligned
     Cell c = (k >= 0 && k < n) ? cells[k] : Cell{' ', false};
     frame[i * 2] = c.c;
     frame[i * 2 + 1] = c.dot ? '.' : ' ';
@@ -127,12 +162,17 @@ void DisplayManager::loop() {
   if (now - _lastTick < kFrameMs) return;
   _lastTick = now;
 
-  if (_flashUntil) {
-    if ((int32_t)(now - _flashUntil) < 0) {
-      drawText(_flashText, now - _flashStart);
+  if (flashing()) {
+    const Card& card = _flash[_flashIdx];
+    if (now - _flashStart < cardMs(card)) {
+      drawText(card.text, now - _flashStart, card.marquee);
       return;
     }
-    _flashUntil = 0;
+    _flashIdx++;
+    _flashStart = now;
+    if (flashing()) return;
+    _flash.clear();
+    _flashIdx = 0;
     if (!_awake) {
       power(false);
       return;
@@ -161,17 +201,17 @@ void DisplayManager::loop() {
   }
   if (_idx >= enabled.size()) _idx = 0;
 
-  const DisplayItem& it = gConfig.items[enabled[_idx]];
   uint32_t el = now - _itemStart;
-  uint32_t labelMs = it.label.isEmpty() ? 0 : kLabelMs;
-  if (el < labelMs) {
-    drawText(it.label, 0);
-    return;
+  for (const Card& card : itemCards(gConfig.items[enabled[_idx]], data)) {
+    uint32_t ms = cardMs(card);
+    if (el < ms) {
+      drawText(card.text, el, card.marquee);
+      return;
+    }
+    el -= ms;
   }
-  String value = renderItem(it, data);
-  uint32_t valueMs = max<uint32_t>(it.seconds * 1000UL, textDuration(value));
-  if (el - labelMs < valueMs) {
-    drawText(value, el - labelMs);
+  if (el < gConfig.blankMs) {  // gap so consecutive items read as separate
+    drawText("", 0);
     return;
   }
   _idx = (_idx + 1) % enabled.size();
@@ -208,7 +248,7 @@ String DisplayManager::renderItem(const DisplayItem& it, const DisplayData& d) {
       return buf;
     }
     case ItemType::Ip:
-      return d.ip.isEmpty() ? String("NO WIFI") : "IP " + d.ip;
+      return d.ip.isEmpty() ? String("NO WIFI") : d.ip;  // itemCards() splits it into octets
     case ItemType::Custom:
       return it.text;
     default:

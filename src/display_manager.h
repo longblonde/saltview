@@ -24,17 +24,33 @@ class DisplayManager {
   void sleep();
   bool awake() const { return _awake; }
 
-  void flash(const String& text, uint32_t ms);  // one-off message, then resume
-  void showNow(const String& text);             // draw immediately (for blocking steps)
+  // One screen of text; text longer than 4 characters scrolls, extending `ms` if needed.
+  // A marquee card scrolls in from the right and out the left at gConfig.scrollMs per
+  // character, and lasts exactly that long (`ms` is ignored).
+  struct Card {
+    String text;
+    uint32_t ms;
+    bool marquee = false;
+  };
+
+  void play(const std::vector<Card>& cards);  // one-off cards (even while asleep), then resume
+  void flash(const String& text, uint32_t ms) { play({{text, ms}}); }
+  void showNow(const String& text);  // draw immediately (for blocking steps)
   void setOverride(const String& text) { _override = text; }  // replaces the rotation while set
 
+  // The cards a rotation item shows: optional label, then its value(s).
+  static std::vector<Card> itemCards(const DisplayItem& it, const DisplayData& d);
+  // "IP", then one octet per card ("192." "168." "1." "232").
+  static std::vector<Card> ipCards(const String& ip);
   static String renderItem(const DisplayItem& it, const DisplayData& d);
+  static uint32_t cardMs(const Card& c);
 
   DisplayData data;
 
  private:
   void power(bool on);
-  void drawText(const String& text, uint32_t elapsedMs);
+  void drawText(const String& text, uint32_t elapsedMs, bool marquee = false);
+  bool flashing() const { return _flashIdx < _flash.size(); }
   static uint32_t textDuration(const String& text);
 
   Adafruit_AlphaNum4 _alpha;
@@ -44,8 +60,9 @@ class DisplayManager {
   uint32_t _wakeAt = 0;
   uint32_t _itemStart = 0;
   size_t _idx = 0;
-  String _flashText;
-  uint32_t _flashStart = 0, _flashUntil = 0;
+  std::vector<Card> _flash;
+  size_t _flashIdx = 0;
+  uint32_t _flashStart = 0;
   String _override;
   char _frame[9] = {0};  // last drawn chars + dots, to skip redundant I2C writes
   uint32_t _lastTick = 0;

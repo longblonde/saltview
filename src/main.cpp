@@ -21,6 +21,7 @@ static constexpr uint32_t kPirWarmupMs = 30000;        // HC-SR501 false-trigger
 static constexpr uint32_t kMaintenanceMs = 5 * 60000;  // stay awake after a reset, even in sleep mode
 static constexpr uint32_t kForgetHoldMs = 5000;
 static constexpr float kRefillJumpPct = 20;
+static constexpr uint32_t kSplashMs = 900;
 
 DistanceSensor gSensor;
 DisplayManager gDisplay;
@@ -159,8 +160,15 @@ void setup() {
   Motion::begin(PIN_PIR, sFromSleep ? 0 : kPirWarmupMs);
 
   gDisplay.begin();
-  if (pirWake) gDisplay.wake();
-  else if (!sFromSleep) gDisplay.flash("SALTVIEW", 1500);
+  if (pirWake) {
+    gDisplay.wake();
+  } else if (!sFromSleep) {
+    // Power-up splash; Wi-Fi setup below blocks, so draw these directly.
+    gDisplay.showNow("SALT");
+    delay(kSplashMs);
+    gDisplay.showNow("VIEW");
+    delay(kSplashMs);
+  }
 
   gSensor.begin();
   gUsagePerDay = History::usagePctPerDay(14);
@@ -179,6 +187,7 @@ void setup() {
   } else {
     configTzTime(gConfig.tz.c_str(), "pool.ntp.org", "time.nist.gov");
     gDisplay.data.ip = WifiMgr::ip();
+    if (!sFromSleep) gDisplay.play(DisplayManager::ipCards(gDisplay.data.ip));  // regardless of item settings
     if (!gDisplay.awake()) gDisplay.sleep();
   }
   Web::begin();

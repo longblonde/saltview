@@ -28,6 +28,12 @@
     <h2>Behaviour</h2>
     <div class="inline">
       <div><label for="awakeSec">Stay on after motion (seconds)</label><input id="awakeSec" type="number" min="5" max="600"></div>
+      <div><label for="blankMs">Blank between items (ms)</label><input id="blankMs" type="number" min="0" max="3000" step="50"></div>
+      <div><label for="scrollMs">Custom text scroll speed</label>
+        <select id="scrollMs">
+          <option value="500">Very slow</option><option value="350">Slow</option><option value="250">Normal</option>
+          <option value="170">Fast</option><option value="110">Very fast</option>
+        </select></div>
       <div><label for="brightness">Brightness <span id="brightVal"></span></label><input id="brightness" type="range" min="0" max="15"></div>
     </div>
   </div>
@@ -61,6 +67,11 @@ const TYPES = [
   ['ip', 'IP address'],
   ['custom', 'Custom text'],
 ];
+// Types whose on-screen time isn't set by the Seconds box.
+const SECONDS_FIXED = {
+  ip: 'Each octet shows for 1 s',
+  custom: 'Shows for as long as the text takes to scroll through',
+};
 let items = [];
 let rendered = [];
 let color = 'red';
@@ -76,9 +87,14 @@ function rowHtml(it, i) {
     <select data-k="type">${TYPES.map(([v, n]) => `<option value="${v}" ${v === it.type ? 'selected' : ''}>${n}</option>`).join('')}</select>
     <input data-k="label" maxlength="4" placeholder="Label">
     <input data-k="text" maxlength="64" placeholder="${it.type === 'custom' ? 'Text to show' : '—'}" ${it.type === 'custom' ? '' : 'disabled'}>
-    <input data-k="seconds" type="number" min="1" max="60">
+    <input data-k="seconds" type="number" min="1" max="60" ${SECONDS_FIXED[it.type] ? `disabled title="${SECONDS_FIXED[it.type]}"` : ''}>
     <button class="btn danger" data-act="remove" title="Remove">&#10005;</button>
   </div>`;
+}
+
+// Only custom items show text; don't keep stale text on the others.
+function dropUnusedText() {
+  items.forEach(it => { if (it.type !== 'custom') it.text = ''; });
 }
 
 function renderItems() {
@@ -98,7 +114,7 @@ $('#items').addEventListener('input', e => {
   if (!row || !k) return;
   const it = items[+row.dataset.i];
   it[k] = e.target.type === 'checkbox' ? e.target.checked : e.target.type === 'number' ? +e.target.value : e.target.value;
-  if (k === 'type') renderItems(); else refreshRender();
+  if (k === 'type') { dropUnusedText(); renderItems(); } else refreshRender();
 });
 
 $('#items').addEventListener('click', e => {
@@ -128,24 +144,31 @@ function refreshRender() {
   }, 250);
 }
 
-// Mirrors DisplayManager::loop timing: label 0.9 s, value N s, long text scrolls.
-const STEP = 220, PAUSE = 700, LABEL = 900;
-const textMs = t => { const n = toCells(t).length; return n <= 4 ? 0 : 2 * PAUSE + (n - 4) * STEP; };
+// Plays each item's cards as timed by the firmware (DisplayManager::itemCards); long text scrolls.
+const STEP = 220, PAUSE = 700;
 let idx = 0, start = performance.now();
 function tick(now) {
-  const enabled = items.map((it, i) => [it, rendered[i]]).filter(([it, r]) => it.enabled && r);
+  const enabled = items.map((it, i) => [it, rendered[i]]).filter(([it, r]) => it.enabled && r?.cards?.length);
   const el = $('#preview');
   if (!enabled.length) { drawAlnum(el, '', 0, color); $('#previewInfo').textContent = 'No enabled items'; }
   else {
     idx %= enabled.length;
-    const [it, r] = enabled[idx];
-    const t = now - start, labelMs = it.label ? LABEL : 0;
-    const valueMs = Math.max(it.seconds * 1000, textMs(r.text));
-    if (t < labelMs) drawAlnum(el, it.label, 0, color);
-    else if (t < labelMs + valueMs) {
-      const n = toCells(r.text).length, st = t - labelMs - PAUSE;
-      drawAlnum(el, r.text, n > 4 && st > 0 ? Math.min(n - 4, Math.floor(st / STEP)) : 0, color);
-    } else { idx++; start = now; }
+    let t = now - start, card = null;
+    const scrollMs = +$('#scrollMs').value;
+    const blank = { text: '', ms: Math.max(0, +$('#blankMs').value || 0) };
+    const cards = enabled[idx][1].cards.map(c =>
+      // Marquee timing uses the unsaved speed: blank -> enters right -> exits left -> blank.
+      c.marquee ? { ...c, text: `    ${c.text}    `, ms: (toCells(`    ${c.text}    `).length - 4) * scrollMs } : c);
+    for (const c of [...cards, blank]) {
+      if (t < c.ms) { card = c; break; }
+      t -= c.ms;
+    }
+    if (!card) { idx++; start = now; }
+    else if (card.marquee) drawAlnum(el, card.text, Math.min(toCells(card.text).length - 4, Math.floor(t / scrollMs)), color);
+    else {
+      const n = toCells(card.text).length, st = t - PAUSE;
+      drawAlnum(el, card.text, n > 4 && st > 0 ? Math.min(n - 4, Math.floor(st / STEP)) : 0, color);
+    }
     $('#previewInfo').textContent = `Item ${idx % enabled.length + 1} of ${enabled.length}`;
   }
   requestAnimationFrame(tick);
@@ -153,7 +176,10 @@ function tick(now) {
 
 $('#save').onclick = async () => {
   try {
-    const c = await api('/api/config', { items, color, awakeSec: +$('#awakeSec').value, brightness: +$('#brightness').value });
+    const c = await api('/api/config', {
+      items, color, awakeSec: +$('#awakeSec').value, blankMs: +$('#blankMs').value, scrollMs: +$('#scrollMs').value,
+      brightness: +$('#brightness').value,
+    });
     items = c.items;
     renderItems();
     toast('Saved');
@@ -164,11 +190,16 @@ $('#wake').onclick = () => api('/api/display/wake', {}).then(() => toast('Displa
 api('/api/config').then(c => {
   $('#devName').textContent = c.name;
   $('#awakeSec').value = c.awakeSec;
+  $('#blankMs').value = c.blankMs ?? 300;
+  // Snap to the nearest preset in case the stored value was set another way.
+  const speeds = $$('#scrollMs option').map(o => +o.value);
+  $('#scrollMs').value = speeds.reduce((a, b) => Math.abs(b - (c.scrollMs ?? 250)) < Math.abs(a - (c.scrollMs ?? 250)) ? b : a);
   $('#brightness').value = c.brightness;
   $('#brightVal').textContent = `(${c.brightness})`;
   color = c.color || 'red';
   $(`#colors input[value="${color}"]`).checked = true;
   items = c.items;
+  dropUnusedText();
   renderItems();
   requestAnimationFrame(tick);
 }).catch(e => toast(e.message));

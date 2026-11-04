@@ -53,6 +53,8 @@ struct Config {
   String color = "red";     // LED colour of the FeatherWing you bought (dashboard preview only)
   uint8_t brightness = 8;   // 0..15
   uint16_t awakeSec = 30;   // how long the display stays on after motion
+  uint16_t blankMs = 300;   // blank gap between rotation items
+  uint16_t scrollMs = 250;  // custom text scroll speed, ms per character
   std::vector<DisplayItem> items;
 
   // Notifications
