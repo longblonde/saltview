@@ -67,11 +67,10 @@ const TYPES = [
   ['ip', 'IP address'],
   ['custom', 'Custom text'],
 ];
-// Types whose on-screen time isn't set by the Seconds box.
-const SECONDS_FIXED = {
-  ip: 'Each octet shows for 1 s',
-  custom: 'Shows for as long as the text takes to scroll through',
-};
+// Seconds is how long each card of an item stays up. Custom text lasts as long as its
+// scroll, so for custom items Seconds only times the label card.
+const secondsDisabled = it => it.type === 'custom' && !it.label;
+const SECONDS_TITLE = 'Custom text shows for as long as it takes to scroll through; Seconds times the label card';
 let items = [];
 let rendered = [];
 let color = 'red';
@@ -87,7 +86,7 @@ function rowHtml(it, i) {
     <select data-k="type">${TYPES.map(([v, n]) => `<option value="${v}" ${v === it.type ? 'selected' : ''}>${n}</option>`).join('')}</select>
     <input data-k="label" maxlength="4" placeholder="Label">
     <input data-k="text" maxlength="64" placeholder="${it.type === 'custom' ? 'Text to show' : '—'}" ${it.type === 'custom' ? '' : 'disabled'}>
-    <input data-k="seconds" type="number" min="1" max="60" ${SECONDS_FIXED[it.type] ? `disabled title="${SECONDS_FIXED[it.type]}"` : ''}>
+    <input data-k="seconds" type="number" min="1" max="60" ${it.type === 'custom' ? `title="${SECONDS_TITLE}"` : ''} ${secondsDisabled(it) ? 'disabled' : ''}>
     <button class="btn danger" data-act="remove" title="Remove">&#10005;</button>
   </div>`;
 }
@@ -114,7 +113,10 @@ $('#items').addEventListener('input', e => {
   if (!row || !k) return;
   const it = items[+row.dataset.i];
   it[k] = e.target.type === 'checkbox' ? e.target.checked : e.target.type === 'number' ? +e.target.value : e.target.value;
-  if (k === 'type') { dropUnusedText(); renderItems(); } else refreshRender();
+  if (k === 'type') { dropUnusedText(); renderItems(); return; }
+  // Toggle in place so typing in the label box keeps focus.
+  if (k === 'label') $('[data-k=seconds]', row).disabled = secondsDisabled(it);
+  refreshRender();
 });
 
 $('#items').addEventListener('click', e => {

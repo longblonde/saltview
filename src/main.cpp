@@ -22,6 +22,7 @@ static constexpr uint32_t kMaintenanceMs = 5 * 60000;  // stay awake after a res
 static constexpr uint32_t kForgetHoldMs = 5000;
 static constexpr float kRefillJumpPct = 20;
 static constexpr uint32_t kSplashMs = 900;
+static constexpr uint32_t kSetupPauseMs = 800;
 
 DistanceSensor gSensor;
 DisplayManager gDisplay;
@@ -110,6 +111,18 @@ void takeReading(bool log) {
   d.daysLeft = (r.valid() && gUsagePerDay > 0.05f) ? r.pct / gUsagePerDay : NAN;
 }
 
+// Setup mode: the heading scrolls full width, a pause, then the network to join, looping.
+static void showSetupScreen() {
+  String heading = WifiMgr::lastError().isEmpty() ? "WIFI SETUP" : "WIFI FAILED";
+  gDisplay.setOverride({
+      {heading, 0, true},
+      {"", kSetupPauseMs},
+      {"JOIN " + WifiMgr::apName(), 0, true},
+      {"", kSetupPauseMs},
+  });
+  gDisplay.wake();
+}
+
 static void handleButton() {
   static uint32_t downAt = 0;
   bool down = digitalRead(PIN_BUTTON) == LOW;
@@ -181,14 +194,16 @@ void setup() {
   if (!gDisplay.awake()) gDisplay.showNow("WIFI");
   WifiMgr::begin(hostname());
   if (WifiMgr::mode() == WifiMgr::Mode::Portal) {
-    String prefix = WifiMgr::lastError().isEmpty() ? "SETUP" : "WIFI FAILED";
-    gDisplay.setOverride(prefix + " - JOIN " + WifiMgr::apName());
-    gDisplay.wake();
+    showSetupScreen();
   } else {
     configTzTime(gConfig.tz.c_str(), "pool.ntp.org", "time.nist.gov");
     gDisplay.data.ip = WifiMgr::ip();
+#ifdef SALTVIEW_FORCE_SETUP_SCREEN  // test builds: show the setup screen without leaving Wi-Fi
+    showSetupScreen();
+#else
     if (!sFromSleep) gDisplay.play(DisplayManager::ipCards(gDisplay.data.ip));  // regardless of item settings
     if (!gDisplay.awake()) gDisplay.sleep();
+#endif
   }
   Web::begin();
 }

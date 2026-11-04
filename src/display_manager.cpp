@@ -6,8 +6,6 @@
 namespace {
 constexpr uint32_t kScrollStepMs = 220;
 constexpr uint32_t kScrollPauseMs = 700;
-constexpr uint32_t kLabelMs = 900;
-constexpr uint32_t kOctetMs = 1000;
 constexpr uint32_t kFrameMs = 30;
 
 struct Cell {
@@ -107,26 +105,29 @@ uint32_t DisplayManager::cardMs(const Card& c) {
   return max(c.ms, textDuration(c.text));
 }
 
-std::vector<DisplayManager::Card> DisplayManager::ipCards(const String& ip) {
-  std::vector<Card> cards{{"IP", kLabelMs}};
+std::vector<DisplayManager::Card> DisplayManager::ipCards(const String& ip, uint32_t ms) {
+  std::vector<Card> cards{{"IP", ms}};
   int start = 0;
   for (int dot; (dot = ip.indexOf('.', start)) >= 0; start = dot + 1)
-    cards.push_back({ip.substring(start, dot + 1), kOctetMs});  // keep the '.' as a decimal point
-  cards.push_back({ip.substring(start), kOctetMs});
+    cards.push_back({ip.substring(start, dot + 1), ms});  // keep the '.' as a decimal point
+  cards.push_back({ip.substring(start), ms});
   return cards;
 }
 
+// Every card of an item stays up for it.seconds; the blank gap comes only after the
+// item's last card. Custom text is the exception: it lasts as long as its scroll.
 std::vector<DisplayManager::Card> DisplayManager::itemCards(const DisplayItem& it, const DisplayData& d) {
+  uint32_t ms = it.seconds * 1000UL;
   std::vector<Card> cards;
-  if (!it.label.isEmpty()) cards.push_back({it.label, kLabelMs});
+  if (!it.label.isEmpty()) cards.push_back({it.label, ms});
   if (it.type == ItemType::Ip && !d.ip.isEmpty()) {
-    auto ip = ipCards(d.ip);
+    auto ip = ipCards(d.ip, ms);
     if (!it.label.isEmpty()) ip.erase(ip.begin());  // a custom label replaces the "IP" card
     cards.insert(cards.end(), ip.begin(), ip.end());
   } else if (it.type == ItemType::Custom) {
-    cards.push_back({it.text, 0, true});  // duration is the scroll itself, not it.seconds
+    cards.push_back({it.text, 0, true});
   } else {
-    cards.push_back({renderItem(it, d), it.seconds * 1000UL});
+    cards.push_back({renderItem(it, d), ms});
   }
   return cards;
 }
@@ -152,6 +153,9 @@ void DisplayManager::drawText(const String& text, uint32_t elapsed, bool marquee
   frame[8] = 0;
   if (memcmp(frame, _frame, sizeof(frame)) == 0) return;
   memcpy(_frame, frame, sizeof(frame));
+#ifdef SALTVIEW_TRACE_DISPLAY  // debug builds: log each new frame, e.g. "[display] 1234 |S A L T |"
+  Serial.printf("[display] %lu |%s|\n", (unsigned long)millis(), frame);
+#endif
   for (int i = 0; i < 4; i++) _alpha.writeDigitAscii(i, frame[i * 2], frame[i * 2 + 1] == '.');
   _alpha.writeDisplay();
 }
@@ -186,9 +190,18 @@ void DisplayManager::loop() {
     return;
   }
 
-  if (!_override.isEmpty()) {
-    uint32_t cycle = textDuration(_override) + 1000;
-    drawText(_override, (now - _wakeAt) % cycle);
+  if (!_override.empty()) {
+    uint32_t cycle = 0;
+    for (const Card& card : _override) cycle += cardMs(card);
+    uint32_t t = cycle ? (now - _wakeAt) % cycle : 0;
+    for (const Card& card : _override) {
+      uint32_t ms = cardMs(card);
+      if (t < ms) {
+        drawText(card.text, t, card.marquee);
+        return;
+      }
+      t -= ms;
+    }
     return;
   }
 

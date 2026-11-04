@@ -36,12 +36,13 @@ class DisplayManager {
   void play(const std::vector<Card>& cards);  // one-off cards (even while asleep), then resume
   void flash(const String& text, uint32_t ms) { play({{text, ms}}); }
   void showNow(const String& text);  // draw immediately (for blocking steps)
-  void setOverride(const String& text) { _override = text; }  // replaces the rotation while set
+  // Cards that loop in place of the rotation while set (e.g. the Wi-Fi setup screen).
+  void setOverride(const std::vector<Card>& cards) { _override = cards; }
 
   // The cards a rotation item shows: optional label, then its value(s).
   static std::vector<Card> itemCards(const DisplayItem& it, const DisplayData& d);
-  // "IP", then one octet per card ("192." "168." "1." "232").
-  static std::vector<Card> ipCards(const String& ip);
+  // "IP", then one octet per card ("192." "168." "1." "232"), each shown for `ms`.
+  static std::vector<Card> ipCards(const String& ip, uint32_t ms = 1000);
   static String renderItem(const DisplayItem& it, const DisplayData& d);
   static uint32_t cardMs(const Card& c);
 
@@ -63,7 +64,7 @@ class DisplayManager {
   std::vector<Card> _flash;
   size_t _flashIdx = 0;
   uint32_t _flashStart = 0;
-  String _override;
+  std::vector<Card> _override;
   char _frame[9] = {0};  // last drawn chars + dots, to skip redundant I2C writes
   uint32_t _lastTick = 0;
 };
