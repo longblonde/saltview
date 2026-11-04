@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SaltView Setup</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main>
+  <div class="card">
+    <div class="chart-head">
+      <h2>Live sensor</h2>
+      <label class="check" style="margin:0"><input type="checkbox" id="livePoll" checked> Auto-refresh</label>
+    </div>
+    <div class="grid" style="margin:0">
+      <div class="stat"><div class="label">Raw counts</div><div class="value" id="liveRaw">--</div></div>
+      <div class="stat"><div class="label">Distance</div><div class="value" id="liveDist">--</div></div>
+      <div class="stat"><div class="label">Level</div><div class="value" id="livePct">--</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>1. Calibrate the distance sensor</h2>
+    <p class="hint">The VCNL4200 measures reflected light, not distance. Aim it at the salt (or a white card)
+      at 3-5 known distances across your tank's range, measure each with a tape, and capture it.
+      Optional first step: point it at nothing within 1.5 m and capture a baseline.</p>
+    <table>
+      <thead><tr><th>#</th><th>Distance</th><th>Raw counts</th><th></th></tr></thead>
+      <tbody id="calRows"></tbody>
+    </table>
+    <div class="inline" style="margin-top:12px">
+      <div><label for="capMm">Known distance (<span class="unit"></span>)</label><input id="capMm" type="number" step="0.1" min="0"></div>
+      <button class="btn primary" id="capture">Capture point</button>
+    </div>
+    <div class="actions">
+      <button class="btn" id="baseline">Capture baseline</button>
+      <span class="hint" id="baselineVal" style="align-self:center"></span>
+      <button class="btn danger" id="clearCal">Clear all points</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2. Tank marks</h2>
+    <p class="hint">Distances from the sensor face. <b>Empty</b> is the lowest useful salt level (tank floor or grid plate);
+      <b>Full</b> is the salt surface when you've just filled it. Type a value or use the live reading.</p>
+    <div class="inline">
+      <div><label for="emptyMm">Empty distance (<span class="unit"></span>)</label><input id="emptyMm" type="number" step="0.1"></div>
+      <button class="btn" data-mark="setEmpty">Use live</button>
+    </div>
+    <div class="inline">
+      <div><label for="fullMm">Full distance (<span class="unit"></span>)</label><input id="fullMm" type="number" step="0.1"></div>
+      <button class="btn" data-mark="setFull">Use live</button>
+    </div>
+    <label for="lowPct">Low-salt alert at (%)</label><input id="lowPct" type="number" min="1" max="95">
+  </div>
+
+  <div class="card">
+    <h2>3. Measurement</h2>
+    <div class="inline">
+      <div><label for="intervalMin">Log every (minutes)</label><input id="intervalMin" type="number" min="5" max="1440"></div>
+      <div><label for="samples">Samples per reading</label><input id="samples" type="number" min="1" max="64"></div>
+    </div>
+    <div class="inline">
+      <div><label for="ledCurrent">IR LED current</label>
+        <select id="ledCurrent"><option value="0">50 mA</option><option value="1">75 mA</option><option value="2">100 mA</option><option value="3">120 mA</option>
+          <option value="4">140 mA</option><option value="5">160 mA</option><option value="6">180 mA</option><option value="7">200 mA</option></select></div>
+      <div><label for="integration">Integration time</label>
+        <select id="integration"><option value="0">1T</option><option value="1">2T</option><option value="2">3T</option><option value="3">4T</option>
+          <option value="4">8T</option><option value="5">9T</option></select></div>
+    </div>
+    <p class="hint" style="margin-top:8px">Changing LED current or integration time changes the raw counts — recalibrate afterwards.</p>
+  </div>
+
+  <div class="card">
+    <h2>4. Notifications</h2>
+    <label class="check"><input type="checkbox" id="notifyLow"> Alert when salt is low</label>
+    <label class="check"><input type="checkbox" id="notifyRefill"> Note when a refill is detected</label>
+    <p class="hint" style="margin-top:12px">Alerts always appear on this dashboard. For phone push, install the
+      <a href="https://ntfy.sh" target="_blank" rel="noopener">ntfy</a> app and subscribe to a hard-to-guess topic name.</p>
+    <div class="inline">
+      <div><label for="ntfyServer">ntfy server</label><input id="ntfyServer"></div>
+      <div><label for="ntfyTopic">ntfy topic (blank = off)</label><input id="ntfyTopic"></div>
+      <button class="btn" id="testNote">Send test</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>5. Device</h2>
+    <div class="inline">
+      <div><label for="name">Device name</label><input id="name" maxlength="24"></div>
+      <div><label for="units">Units</label><select id="units"><option value="in">Inches</option><option value="cm">Centimeters</option></select></div>
+    </div>
+    <label for="tzSel">Time zone</label>
+    <select id="tzSel">
+      <option value="EST5EDT,M3.2.0,M11.1.0">US Eastern</option>
+      <option value="CST6CDT,M3.2.0,M11.1.0">US Central</option>
+      <option value="MST7MDT,M3.2.0,M11.1.0">US Mountain</option>
+      <option value="MST7">US Arizona</option>
+      <option value="PST8PDT,M3.2.0,M11.1.0">US Pacific</option>
+      <option value="GMT0BST,M3.5.0/1,M10.5.0">UK</option>
+      <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe</option>
+      <option value="AEST-10AEDT,M10.1.0,M4.1.0/3">Australia Eastern</option>
+      <option value="UTC0">UTC</option>
+      <option value="custom">Custom POSIX string…</option>
+    </select>
+    <input id="tz" placeholder="POSIX TZ string" hidden style="margin-top:8px">
+    <label for="power">Power mode</label>
+    <select id="power">
+      <option value="on">Always on (USB power, dashboard always reachable)</option>
+      <option value="sleep">Deep sleep (battery; wakes on motion and each log interval)</option>
+    </select>
+  </div>
+
+  <div class="actions" style="margin-bottom:16px">
+    <button class="btn primary" id="save">Save settings</button>
+  </div>
+
+  <div class="card">
+    <h2>Network &amp; maintenance</h2>
+    <p class="hint" id="netInfo"></p>
+    <div class="actions">
+      <button class="btn" id="forgetWifi">Change Wi-Fi…</button>
+      <button class="btn" id="reboot">Reboot</button>
+      <button class="btn danger" id="clearHistory">Clear history</button>
+    </div>
+  </div>
+</main>
+<script src="app.js"></script>
+<script>
+renderHeader('setup.html');
+let cfg = null;
+const unit = () => $('#units').value;
+const FIELDS = ['lowPct', 'intervalMin', 'samples', 'ledCurrent', 'integration', 'ntfyServer', 'ntfyTopic', 'name', 'units', 'power'];
+
+function fill(c) {
+  cfg = c;
+  FIELDS.forEach(k => $('#' + k).value = c[k]);
+  $('#notifyLow').checked = c.notifyLow;
+  $('#notifyRefill').checked = c.notifyRefill;
+  const known = $$('#tzSel option').some(o => o.value === c.tz);
+  $('#tzSel').value = known ? c.tz : 'custom';
+  $('#tz').value = c.tz;
+  $('#tz').hidden = known;
+  renderUnits();
+}
+
+function renderUnits() {
+  const u = unit();
+  $$('.unit').forEach(el => el.textContent = u);
+  $('#emptyMm').value = toUnits(cfg.emptyMm, u).toFixed(1);
+  $('#fullMm').value = toUnits(cfg.fullMm, u).toFixed(1);
+  $('#baselineVal').textContent = cfg.baseline ? `Baseline: ${cfg.baseline} counts` : 'No baseline';
+  const rows = $('#calRows');
+  rows.innerHTML = cfg.cal.length ? '' : '<tr><td colspan="4" class="hint">No points yet</td></tr>';
+  cfg.cal.forEach((p, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${i + 1}</td><td>${fmtLen(p.mm, u)}</td><td>${p.raw}</td><td><button class="btn danger" data-rm="${i}">Remove</button></td>`;
+    rows.appendChild(tr);
+  });
+}
+
+async function calibrate(body) {
+  try {
+    const r = await api('/api/calibrate', body);
+    fill(r.config);
+    return r;
+  } catch (e) { toast(e.message); }
+}
+
+$('#units').onchange = renderUnits;
+$('#tzSel').onchange = e => { $('#tz').hidden = e.target.value !== 'custom'; if (e.target.value !== 'custom') $('#tz').value = e.target.value; };
+
+$('#capture').onclick = async () => {
+  const v = parseFloat($('#capMm').value);
+  if (!(v > 0)) return toast('Enter the measured distance first');
+  const r = await calibrate({ action: 'capture', mm: fromUnits(v, unit()) });
+  if (r) { toast(`Captured ${r.raw} counts`); $('#capMm').value = ''; }
+};
+$('#calRows').onclick = e => { const i = e.target.dataset.rm; if (i !== undefined) calibrate({ action: 'remove', index: +i }); };
+$('#clearCal').onclick = () => confirm('Remove all calibration points?') && calibrate({ action: 'clear' });
+$('#baseline').onclick = () => calibrate({ action: 'baseline' });
+$$('[data-mark]').forEach(b => b.onclick = async () => {
+  const r = await calibrate({ action: b.dataset.mark });
+  if (r) toast(`Set to ${fmtLen(r.mm, unit())}`);
+});
+
+$('#save').onclick = async () => {
+  const u = unit();
+  const body = {
+    emptyMm: fromUnits(+$('#emptyMm').value, u),
+    fullMm: fromUnits(+$('#fullMm').value, u),
+    notifyLow: $('#notifyLow').checked,
+    notifyRefill: $('#notifyRefill').checked,
+    tz: $('#tzSel').value === 'custom' ? $('#tz').value : $('#tzSel').value,
+  };
+  FIELDS.forEach(k => body[k] = $('#' + k).value);
+  ['lowPct', 'intervalMin', 'samples', 'ledCurrent', 'integration'].forEach(k => body[k] = +body[k]);
+  try { fill(await api('/api/config', body)); toast('Saved'); } catch (e) { toast(e.message); }
+};
+
+$('#testNote').onclick = async () => {
+  await $('#save').onclick();
+  await api('/api/notifications', { action: 'test' });
+  toast('Test notification sent');
+  pollNotes();
+};
+
+$('#forgetWifi').onclick = async () => {
+  if (!confirm('Forget this Wi-Fi network and reboot into setup mode? Join the "SaltView-XXXX" network from your phone to pick a new one.')) return;
+  await api('/api/wifi/forget', {});
+  toast('Rebooting into setup mode…');
+};
+$('#reboot').onclick = async () => { await api('/api/reboot', {}); toast('Rebooting…'); };
+$('#clearHistory').onclick = async () => {
+  if (!confirm('Delete all logged readings?')) return;
+  await api('/api/history/clear', {});
+  toast('History cleared');
+};
+
+async function pollLive() {
+  if ($('#livePoll').checked && cfg) {
+    try {
+      const r = await api('/api/live');
+      $('#liveRaw').textContent = r.sensorOk ? r.raw : 'no sensor';
+      $('#liveDist').textContent = fmtLen(r.distMm, unit());
+      $('#livePct').textContent = fmtPct(r.pct);
+    } catch (e) { /* ignore */ }
+  }
+  setTimeout(pollLive, 1500);
+}
+
+api('/api/config').then(fill).then(pollLive).catch(e => toast(e.message));
+api('/api/status').then(s => {
+  $('#devName').textContent = s.name;
+  $('#netInfo').textContent = `Connected to ${s.ssid} as ${s.ip} (${s.rssi} dBm). Firmware ${s.fw}.`;
+});
+</script>
+</body>
+</html>

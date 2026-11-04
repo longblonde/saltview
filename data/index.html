@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SaltView</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main>
+  <div class="card" id="setupHint" hidden>
+    <h2>Finish setup</h2>
+    <p class="hint">The sensor isn't calibrated yet, so levels can't be shown. Go to <a href="setup.html">Setup</a> to calibrate and set your tank's empty and full marks.</p>
+  </div>
+
+  <div class="grid">
+    <div class="card stat">
+      <div class="label">Salt level</div>
+      <div class="value" id="level">--</div>
+      <div class="gauge"><div class="fill" id="gaugeFill" style="width:0"></div><div class="mark" id="gaugeMark"></div></div>
+    </div>
+    <div class="card stat">
+      <div class="label">Salt depth</div>
+      <div class="value" id="depth">--</div>
+      <div class="sub" id="distance">Distance to salt --</div>
+    </div>
+    <div class="card stat">
+      <div class="label">Estimated days left</div>
+      <div class="value" id="daysLeft">--</div>
+      <div class="sub" id="usage">Usage --</div>
+    </div>
+    <div class="card stat">
+      <div class="label">Last reading</div>
+      <div class="value" id="lastTime" style="font-size:20px">--</div>
+      <div class="actions"><button class="btn" id="measure">Measure now</button></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="chart-head">
+      <h2>Salt level over time</h2>
+      <div class="seg" id="range">
+        <button data-days="7">7d</button><button data-days="30" class="on">30d</button><button data-days="90">90d</button><button data-days="365">1y</button>
+      </div>
+    </div>
+    <canvas id="levelChart"></canvas>
+  </div>
+
+  <div class="card">
+    <h2>Daily salt use (% of tank)</h2>
+    <canvas id="usageChart" class="short"></canvas>
+  </div>
+
+  <div class="card">
+    <h2>Notifications</h2>
+    <ul class="notes" id="pageNotes"></ul>
+  </div>
+
+  <p class="hint" id="footer"></p>
+</main>
+<script src="app.js"></script>
+<script>
+renderHeader('index.html');
+let status = null, rows = [], days = 30;
+
+async function loadStatus() {
+  status = await api('/api/status');
+  const s = status, r = s.reading, u = s.units;
+  $('#devName').textContent = s.name;
+  document.title = s.name;
+  $('#setupHint').hidden = s.calibrated;
+  $('#level').textContent = fmtPct(r.pct);
+  $('#gaugeFill').style.width = `${r.pct ?? 0}%`;
+  $('#gaugeFill').classList.toggle('low', r.pct != null && r.pct <= s.lowPct);
+  $('#gaugeMark').style.left = `${s.lowPct}%`;
+  $('#depth').textContent = fmtLen(r.depthMm, u);
+  $('#distance').textContent = `Distance to salt ${fmtLen(r.distMm, u)}`;
+  $('#daysLeft').textContent = s.daysLeft == null ? '--' : Math.round(s.daysLeft);
+  $('#usage').textContent = s.usagePerDay == null ? 'Usage: needs a day of history' : `Usage ${s.usagePerDay.toFixed(1)}% per day`;
+  $('#lastTime').textContent = fmtTime(r.ts);
+  $('#footer').textContent = `${s.ip} · ${s.ssid} (${s.rssi} dBm) · firmware ${s.fw} · up ${Math.round(s.uptime / 3600)} h`;
+}
+
+async function loadHistory() {
+  rows = await api(`/api/history?days=${days}`);
+  drawCharts();
+}
+
+function drawCharts() {
+  drawLineChart($('#levelChart'), rows.map(r => [r[0], r[1]]), { threshold: status?.lowPct });
+  drawBarChart($('#usageChart'), dailyUsage(rows), { yFmt: v => `${v.toFixed(0)}%` });
+}
+
+$('#range').onclick = e => {
+  const d = e.target.dataset.days;
+  if (!d) return;
+  days = +d;
+  $$('#range button').forEach(b => b.classList.toggle('on', b === e.target));
+  loadHistory();
+};
+
+$('#measure').onclick = async e => {
+  e.target.disabled = true;
+  try { await api('/api/measure', {}); await loadStatus(); await loadHistory(); toast('Reading logged'); }
+  catch (err) { toast(err.message); }
+  e.target.disabled = false;
+};
+
+window.addEventListener('resize', drawCharts);
+loadStatus().then(loadHistory).catch(e => toast(e.message));
+setInterval(() => loadStatus().catch(() => {}), 60000);
+</script>
+</body>
+</html>

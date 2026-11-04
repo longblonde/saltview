@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SaltView Display</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main>
+  <div class="card">
+    <div class="chart-head">
+      <h2>Preview</h2>
+      <span class="hint" id="previewInfo"></span>
+    </div>
+    <div class="alnum" id="preview"></div>
+    <p class="hint" style="margin-top:12px">Shows the rotation with live values, including unsaved changes.
+      When motion is detected the display wakes, cycles these items, then sleeps.</p>
+  </div>
+
+  <div class="card">
+    <h2>Display colour</h2>
+    <p class="hint">Match the colour of the FeatherWing you have. The LED colour is set by the hardware; this only changes the preview.</p>
+    <div class="swatches" id="colors" role="radiogroup" aria-label="Display colour"></div>
+  </div>
+
+  <div class="card">
+    <h2>Behaviour</h2>
+    <div class="inline">
+      <div><label for="awakeSec">Stay on after motion (seconds)</label><input id="awakeSec" type="number" min="5" max="600"></div>
+      <div><label for="brightness">Brightness <span id="brightVal"></span></label><input id="brightness" type="range" min="0" max="15"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Rotation</h2>
+    <p class="hint">Items show in order. A label (up to 4 characters) flashes briefly before the value; text longer than 4 characters scrolls.</p>
+    <div class="items" id="items">
+      <div class="item head"><span></span><span>On</span><span>Shows</span><span>Label</span><span>Text</span><span>Seconds</span><span></span></div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="addItem">+ Add item</button>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn primary" id="save">Save</button>
+    <button class="btn" id="wake">Wake display now</button>
+  </div>
+</main>
+<script src="app.js"></script>
+<script>
+renderHeader('display.html');
+
+const TYPES = [
+  ['level', 'Salt level %'],
+  ['depth', 'Salt depth'],
+  ['days', 'Days left'],
+  ['status', 'Status (OK / LOW / ERR)'],
+  ['clock', 'Clock'],
+  ['ip', 'IP address'],
+  ['custom', 'Custom text'],
+];
+let items = [];
+let rendered = [];
+let color = 'red';
+
+$('#colors').innerHTML = Object.entries(DISPLAY_COLORS).map(([key, [name, hex]]) =>
+  `<label><input type="radio" name="color" value="${key}"><span class="chip" style="color:${hex}"></span>${name}</label>`).join('');
+$('#colors').onchange = e => { color = e.target.value; };
+
+function rowHtml(it, i) {
+  return `<div class="item" data-i="${i}">
+    <div class="move"><button data-act="up" title="Move up">&#9650;</button><button data-act="down" title="Move down">&#9660;</button></div>
+    <input type="checkbox" data-k="enabled" ${it.enabled ? 'checked' : ''} title="Enabled">
+    <select data-k="type">${TYPES.map(([v, n]) => `<option value="${v}" ${v === it.type ? 'selected' : ''}>${n}</option>`).join('')}</select>
+    <input data-k="label" maxlength="4" placeholder="Label">
+    <input data-k="text" maxlength="64" placeholder="${it.type === 'custom' ? 'Text to show' : '—'}" ${it.type === 'custom' ? '' : 'disabled'}>
+    <input data-k="seconds" type="number" min="1" max="60">
+    <button class="btn danger" data-act="remove" title="Remove">&#10005;</button>
+  </div>`;
+}
+
+function renderItems() {
+  $$('#items .item:not(.head)').forEach(el => el.remove());
+  items.forEach((it, i) => {
+    $('#items').insertAdjacentHTML('beforeend', rowHtml(it, i));
+    const row = $(`#items [data-i="${i}"]`);
+    $('[data-k=label]', row).value = it.label;
+    $('[data-k=text]', row).value = it.text;
+    $('[data-k=seconds]', row).value = it.seconds;
+  });
+  refreshRender();
+}
+
+$('#items').addEventListener('input', e => {
+  const row = e.target.closest('.item'), k = e.target.dataset.k;
+  if (!row || !k) return;
+  const it = items[+row.dataset.i];
+  it[k] = e.target.type === 'checkbox' ? e.target.checked : e.target.type === 'number' ? +e.target.value : e.target.value;
+  if (k === 'type') renderItems(); else refreshRender();
+});
+
+$('#items').addEventListener('click', e => {
+  const act = e.target.dataset.act, row = e.target.closest('.item');
+  if (!act || !row) return;
+  const i = +row.dataset.i;
+  if (act === 'remove') items.splice(i, 1);
+  if (act === 'up' && i > 0) [items[i - 1], items[i]] = [items[i], items[i - 1]];
+  if (act === 'down' && i < items.length - 1) [items[i + 1], items[i]] = [items[i], items[i + 1]];
+  renderItems();
+});
+
+$('#addItem').onclick = () => {
+  if (items.length >= 12) return toast('Up to 12 items');
+  items.push({ type: 'custom', enabled: true, seconds: 3, label: '', text: 'ADD SALT' });
+  renderItems();
+};
+
+$('#brightness').oninput = e => $('#brightVal').textContent = `(${e.target.value})`;
+
+// Ask the device to render the (unsaved) list so the preview matches the real firmware output.
+let renderTimer;
+function refreshRender() {
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(async () => {
+    try { rendered = (await api('/api/display/render', { items })).items; } catch (e) { /* keep last */ }
+  }, 250);
+}
+
+// Mirrors DisplayManager::loop timing: label 0.9 s, value N s, long text scrolls.
+const STEP = 220, PAUSE = 700, LABEL = 900;
+const textMs = t => { const n = toCells(t).length; return n <= 4 ? 0 : 2 * PAUSE + (n - 4) * STEP; };
+let idx = 0, start = performance.now();
+function tick(now) {
+  const enabled = items.map((it, i) => [it, rendered[i]]).filter(([it, r]) => it.enabled && r);
+  const el = $('#preview');
+  if (!enabled.length) { drawAlnum(el, '', 0, color); $('#previewInfo').textContent = 'No enabled items'; }
+  else {
+    idx %= enabled.length;
+    const [it, r] = enabled[idx];
+    const t = now - start, labelMs = it.label ? LABEL : 0;
+    const valueMs = Math.max(it.seconds * 1000, textMs(r.text));
+    if (t < labelMs) drawAlnum(el, it.label, 0, color);
+    else if (t < labelMs + valueMs) {
+      const n = toCells(r.text).length, st = t - labelMs - PAUSE;
+      drawAlnum(el, r.text, n > 4 && st > 0 ? Math.min(n - 4, Math.floor(st / STEP)) : 0, color);
+    } else { idx++; start = now; }
+    $('#previewInfo').textContent = `Item ${idx % enabled.length + 1} of ${enabled.length}`;
+  }
+  requestAnimationFrame(tick);
+}
+
+$('#save').onclick = async () => {
+  try {
+    const c = await api('/api/config', { items, color, awakeSec: +$('#awakeSec').value, brightness: +$('#brightness').value });
+    items = c.items;
+    renderItems();
+    toast('Saved');
+  } catch (e) { toast(e.message); }
+};
+$('#wake').onclick = () => api('/api/display/wake', {}).then(() => toast('Display on'));
+
+api('/api/config').then(c => {
+  $('#devName').textContent = c.name;
+  $('#awakeSec').value = c.awakeSec;
+  $('#brightness').value = c.brightness;
+  $('#brightVal').textContent = `(${c.brightness})`;
+  color = c.color || 'red';
+  $(`#colors input[value="${color}"]`).checked = true;
+  items = c.items;
+  renderItems();
+  requestAnimationFrame(tick);
+}).catch(e => toast(e.message));
+</script>
+</body>
+</html>
