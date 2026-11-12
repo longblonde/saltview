@@ -7,6 +7,7 @@
 
 namespace WifiMgr {
 static constexpr uint32_t kConnectTimeoutMs = 30000;
+static constexpr uint8_t kJoinRetries = 2;
 static constexpr uint32_t kPortalTimeoutMs = 10 * 60 * 1000;  // then retry saved network
 
 static Mode sMode = Mode::Connecting;
@@ -21,10 +22,13 @@ static const char* reasonText(uint8_t reason) {
     case WIFI_REASON_NO_AP_FOUND:
       return "network not found - check the name (it's case-sensitive) and that it's 2.4 GHz";
     case WIFI_REASON_AUTH_FAIL:
+      return "the router refused the connection at login, which is usually a router setting such as MAC "
+             "filtering rather than the password";
     case WIFI_REASON_AUTH_EXPIRE:
+      return "the router stopped responding during login";
     case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
     case WIFI_REASON_HANDSHAKE_TIMEOUT:
-      return "wrong password, or the network's security mode isn't supported";
+      return "wrong password (or a very weak signal)";
     case WIFI_REASON_ASSOC_FAIL:
     case WIFI_REASON_ASSOC_TOOMANY:
       return "the router refused the connection";
@@ -69,8 +73,9 @@ void begin(const String& hostname) {
 
   WiFi.onEvent(
       [](WiFiEvent_t, WiFiEventInfo_t info) {
-        sDisconnectReason = info.wifi_sta_disconnected.reason;
-        Serial.printf("[wifi] disconnected, reason %u\n", sDisconnectReason);
+        uint8_t reason = info.wifi_sta_disconnected.reason;
+        if (reason != WIFI_REASON_ASSOC_LEAVE) sDisconnectReason = reason;  // our own disconnect() isn't the cause
+        Serial.printf("[wifi] disconnected, reason %u\n", reason);
       },
       ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.onEvent(
@@ -89,7 +94,18 @@ void begin(const String& hostname) {
   WiFi.setAutoReconnect(true);
   WiFi.begin(sSsid.c_str(), pass.c_str());
   uint32_t t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < kConnectTimeoutMs) delay(100);
+  uint8_t retries = 0;
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < kConnectTimeoutMs) {
+    // The Wi-Fi library gives up for good after a rejected login, so ask again ourselves.
+    if (WiFi.status() == WL_CONNECT_FAILED && retries < kJoinRetries) {
+      retries++;
+      Serial.printf("[wifi] rejected, retry %u of %u\n", retries, kJoinRetries);
+      WiFi.disconnect();
+      delay(1000);
+      WiFi.begin(sSsid.c_str(), pass.c_str());
+    }
+    delay(100);
+  }
   if (WiFi.status() != WL_CONNECTED) {
     sLastError = (sAssociated && WiFi.isConnected())
                      ? "joined the network but the router gave no IP address (DHCP)"
