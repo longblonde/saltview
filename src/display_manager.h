@@ -10,6 +10,7 @@ struct DisplayData {
   bool low = false;
   bool sensorOk = true;
   String ip;
+  int32_t liveRaw = -1;  // raw sensor counts for the Live item, -1 until read
 };
 
 // Drives the Quad Alphanumeric FeatherWing. Off (HT16K33 standby) until woken by
@@ -23,6 +24,8 @@ class DisplayManager {
   void wake();  // turn on / extend the awake window
   void sleep();
   bool awake() const { return _awake; }
+  bool on() const { return _awake || flashing(); }
+  static bool showsLive();  // an enabled rotation item is the live sensor reading
 
   // One screen of text; text longer than 4 characters scrolls, extending `ms` if needed.
   // A marquee card scrolls in from the right and out the left at gConfig.scrollMs per

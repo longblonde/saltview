@@ -33,9 +33,11 @@ off again.
   from the live reading, low-salt threshold, logging interval, sensor LED/integration, time zone,
   units, ntfy push settings, power mode.
 - **Display options page**: add, remove, reorder, enable/disable rotation items (level, depth, days
-  left, status, clock, IP, custom text), per-item label and duration, brightness, stay-on time, and a
-  live 14-segment preview that renders through the firmware's own formatter, in the LED colour of
-  your FeatherWing (white, green, red, blue, yellow-green or yellow).
+  left, status, clock, IP, custom text, live sensor), per-item label and duration, brightness,
+  stay-on time, and a live 14-segment preview that renders through the firmware's own formatter, in
+  the LED colour of your FeatherWing (white, green, red, blue, yellow-green or yellow). Motion only
+  wakes the display: every item shows the newest logged measurement, except *Live sensor*, which
+  reads raw counts twice a second for troubleshooting (above 9999 it rolls over: 12345 shows 2345).
 - **Notifications**: low salt (with hysteresis), refill detected, sensor fault. Shown on the
   dashboard and optionally pushed to your phone via [ntfy](https://ntfy.sh).
 - **Power modes**: *Always on* (USB, default) or *Deep sleep* (wakes on PIR or the log timer; stays

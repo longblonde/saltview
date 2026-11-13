@@ -231,6 +231,12 @@ void DisplayManager::loop() {
   _itemStart = now;
 }
 
+bool DisplayManager::showsLive() {
+  for (const auto& it : gConfig.items)
+    if (it.enabled && it.type == ItemType::Live) return true;
+  return false;
+}
+
 String DisplayManager::renderItem(const DisplayItem& it, const DisplayData& d) {
   const Reading& r = d.reading;
   switch (it.type) {
@@ -264,6 +270,14 @@ String DisplayManager::renderItem(const DisplayItem& it, const DisplayData& d) {
       return d.ip.isEmpty() ? String("NO WIFI") : d.ip;  // itemCards() splits it into octets
     case ItemType::Custom:
       return it.text;
+    case ItemType::Live: {  // troubleshooting: raw counts, odometer-style past 9999 (12345 -> 2345)
+      if (!d.sensorOk) return "ERR";
+      if (d.liveRaw < 0) return "----";
+      if (d.liveRaw < 10000) return String(d.liveRaw);
+      char buf[6];
+      snprintf(buf, sizeof(buf), "%04ld", (long)(d.liveRaw % 10000));
+      return buf;
+    }
     default:
       return "";
   }

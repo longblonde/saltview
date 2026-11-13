@@ -132,7 +132,7 @@ static void handleLive() {
 }
 
 static void handleMeasure() {
-  takeReading(true);
+  takeReading();
   JsonDocument doc;
   readingToJson(gLast, doc.to<JsonObject>());
   sendJson(200, doc);
@@ -253,6 +253,11 @@ static void handleDisplayRender() {
     }
   } else {
     items = gConfig.items;
+  }
+  for (const auto& it : items) {
+    if (it.type != ItemType::Live) continue;
+    gDisplay.data.liveRaw = gSensor.ok() ? gSensor.readRaw(gConfig.samples) : -1;  // fresh value for the preview
+    break;
   }
   JsonDocument doc;
   JsonArray arr = doc["items"].to<JsonArray>();

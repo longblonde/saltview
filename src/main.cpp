@@ -23,6 +23,8 @@ static constexpr uint32_t kForgetHoldMs = 5000;
 static constexpr float kRefillJumpPct = 20;
 static constexpr uint32_t kSplashMs = 900;
 static constexpr uint32_t kSetupPauseMs = 800;
+static constexpr uint32_t kLiveEveryMs = 500;
+static constexpr uint8_t kLiveSamples = 8;  // a quick read (~70 ms) so the display keeps moving
 
 DistanceSensor gSensor;
 DisplayManager gDisplay;
@@ -104,19 +106,19 @@ static void showOnDisplay(const Reading& r) {
   d.daysLeft = daysLeftFor(r);
 }
 
-// Unlogged readings (motion wakes, boot) only refresh the display; the dashboard and the
-// alerts follow the log, so deleting a bad row from it removes it everywhere.
-void takeReading(bool log) {
+// The dashboard, the display and the alerts all follow the log, so deleting a bad row
+// removes it everywhere. Only the Live display item (and Setup's live view) read the sensor.
+void takeReading() {
   Reading r = gSensor.ok() ? gSensor.measure() : Reading();
-  if (log) {
-    time_t t = time(nullptr);
-    rtcLastLogTs = t >= kValidEpoch ? (uint32_t)t : 0;
-    History::append(r);
+  time_t t = time(nullptr);
+  rtcLastLogTs = t >= kValidEpoch ? (uint32_t)t : 0;
+  History::append(r);  // skips invalid readings and ones without a clock
+  if (r.valid() && r.ts) {
     gLast = r;
     gUsagePerDay = History::usagePctPerDay(14);
-    evaluateAlerts(r);
   }
-  showOnDisplay(r);
+  evaluateAlerts(r);  // also reports a sensor that stopped answering
+  showOnDisplay(gLast);
 }
 
 void reloadFromHistory(bool resetAlerts) {
@@ -214,7 +216,6 @@ void setup() {
   gSensor.begin();
   reloadFromHistory(!sFromSleep);  // after a power cycle the RTC alert state is gone: rebuild it from the log
   if (!sFromSleep) rtcLastLogTs = gLast.ts;  // ...and keep the log schedule, rather than logging on every reboot
-  takeReading(false);
 
   // In sleep mode a PIR wake just shows the display, unless a log is also due.
   sOffline = gConfig.power == PowerMode::DeepSleep && pirWake && !logDue();
@@ -247,13 +248,15 @@ void loop() {
   }
   handleButton();
 
-  if (Motion::takeTriggered()) {
-    if (!gDisplay.awake()) takeReading(false);  // fresh value for the display
-    gDisplay.wake();
+  if (Motion::takeTriggered()) gDisplay.wake();  // motion only wakes the display; it shows the last measurement
+  static uint32_t lastLive = 0;
+  if (gDisplay.on() && DisplayManager::showsLive() && millis() - lastLive >= kLiveEveryMs) {
+    lastLive = millis();
+    gDisplay.data.liveRaw = gSensor.ok() ? gSensor.readRaw(kLiveSamples) : -1;
   }
   gDisplay.loop();
 
-  if (logDue()) takeReading(true);
+  if (logDue()) takeReading();
   if (gRestartAt && (int32_t)(millis() - gRestartAt) >= 0) ESP.restart();
 
   maybeDeepSleep();

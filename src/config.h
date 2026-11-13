@@ -11,7 +11,7 @@ constexpr size_t kMaxDisplayItems = 12;
 constexpr const char* kDisplayColors[] = {"white", "green", "red", "blue", "yellowgreen", "yellow"};
 
 // Things the quad display can show in its rotation.
-enum class ItemType : uint8_t { Level, Depth, DaysLeft, Status, Clock, Ip, Custom, COUNT };
+enum class ItemType : uint8_t { Level, Depth, DaysLeft, Status, Clock, Ip, Custom, Live, COUNT };
 const char* itemTypeName(ItemType t);
 bool itemTypeFromName(const char* s, ItemType& out);
 

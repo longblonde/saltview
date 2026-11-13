@@ -7,7 +7,7 @@ static const char* kKey = "cfg";
 
 Config gConfig;
 
-static const char* const kItemNames[] = {"level", "depth", "days", "status", "clock", "ip", "custom"};
+static const char* const kItemNames[] = {"level", "depth", "days", "status", "clock", "ip", "custom", "live"};
 static_assert(sizeof(kItemNames) / sizeof(kItemNames[0]) == (size_t)ItemType::COUNT, "item names");
 
 const char* itemTypeName(ItemType t) {
