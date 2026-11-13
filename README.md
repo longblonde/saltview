@@ -21,7 +21,10 @@ off again.
   captive portal. Pick your network and the device reboots onto it. The portal page is compiled
   into the firmware, so it works before the dashboard files are uploaded.
 - **Dashboard** (`http://saltview.local`): level, depth, estimated days left, usage per day,
-  level-over-time chart (7 d / 30 d / 90 d / 1 y), daily usage bars, notification feed.
+  level-over-time chart (7 d / 30 d / 90 d / 1 y) with a selectable dot per measurement and its
+  details underneath, daily usage bars, notification feed.
+- **Measurements** (`log.html`, linked from Setup): every logged reading in a table; likely-bad ones
+  (closer than the sensor can see, or a sudden drop) are flagged, and any can be deleted.
 - **Distance sensing**: trimmed-mean of N samples, converted to distance with a multi-point
   calibration curve (see below), then to % between your tank's empty and full marks.
 - **Calibration / setup page**: live raw readings, capture calibration points, set empty/full marks
@@ -108,7 +111,8 @@ docs/                   wiring diagram and pinouts
 | GET | `/api/status` | | Latest reading, usage, days left, network, unread count |
 | GET | `/api/live` | | Unlogged reading (raw, distMm, pct) for calibration |
 | POST | `/api/measure` | `{}` | Take and log a reading now |
-| GET | `/api/history` | `?days=30` | `[[ts, pct, depthMm, raw], ...]` |
+| GET | `/api/history` | `?days=30` | `[[ts, pct, depthMm, raw, distMm], ...]` |
+| POST | `/api/history/delete` | `{ts: [unixSeconds, ...]}` | Delete those readings, returns `{removed}` |
 | POST | `/api/history/clear` | `{}` | Delete the log |
 | GET / POST | `/api/config` | partial config JSON | Read / update settings |
 | POST | `/api/calibrate` | `{action: capture\|remove\|clear\|baseline\|setEmpty\|setFull, mm?, index?}` | Calibration |

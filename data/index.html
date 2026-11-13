@@ -43,7 +43,9 @@
         <button data-days="7">7d</button><button data-days="30" class="on">30d</button><button data-days="90">90d</button><button data-days="365">1y</button>
       </div>
     </div>
-    <canvas id="levelChart"></canvas>
+    <canvas id="levelChart" class="pick" tabindex="0" aria-label="Salt level graph. Select a dot, or use the arrow keys, to see that measurement."></canvas>
+    <div class="details" id="pointDetails" hidden></div>
+    <p class="hint" id="pickHint" style="margin:8px 0 0">Select a dot to see that measurement. <a href="log.html">All measurements</a></p>
   </div>
 
   <div class="card">
@@ -61,7 +63,7 @@
 <script src="app.js"></script>
 <script>
 renderHeader('index.html');
-let status = null, rows = [], days = 30;
+let status = null, rows = [], days = 30, selTs = 0;
 
 async function loadStatus() {
   status = await api('/api/status');
@@ -86,10 +88,54 @@ async function loadHistory() {
   drawCharts();
 }
 
+const selIndex = () => rows.findIndex(r => r[0] === selTs);
+
 function drawCharts() {
-  drawLineChart($('#levelChart'), rows.map(r => [r[0], r[1]]), { threshold: status?.lowPct });
+  drawLineChart($('#levelChart'), rows.map(r => [r[0], r[1]]), { threshold: status?.lowPct, selected: selIndex() });
+  showDetails();
   drawBarChart($('#usageChart'), dailyUsage(rows), { yFmt: v => `${v.toFixed(0)}%` });
 }
+
+function showDetails() {
+  const i = selIndex(), box = $('#pointDetails');
+  box.hidden = i < 0;
+  $('#pickHint').hidden = i >= 0;
+  if (i < 0) return;
+  const [ts, pct, depth, raw, dist] = rows[i], u = status?.units || 'in';
+  const change = i ? pct - rows[i - 1][1] : null;
+  const field = (k, v) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  box.innerHTML = field('Measured', fmtTime(ts)) + field('Salt level', fmtPct(pct)) +
+    field('Change from previous', change == null ? 'first reading' : `${change > 0 ? '+' : ''}${change.toFixed(1)} points`) +
+    field('Salt depth', fmtLen(depth, u)) + field('Distance to salt', dist == null ? '--' : fmtLen(dist, u)) +
+    field('Raw sensor value', raw) +
+    `<div class="actions"><button class="btn danger" id="delPoint">Delete this measurement</button>
+     <a href="log.html?ts=${ts}">Open in measurements</a> <span class="hint">${i + 1} of ${rows.length}</span></div>`;
+  $('#delPoint').onclick = async () => {
+    if (!confirm(`Permanently delete the ${fmtTime(ts)} measurement (${fmtPct(pct)})? This can't be undone.`)) return;
+    try {
+      await api('/api/history/delete', { ts: [ts] });
+      selTs = rows[i + 1]?.[0] || rows[i - 1]?.[0] || 0;
+      toast('Measurement deleted');
+      await loadStatus(); await loadHistory();
+    } catch (err) { toast(err.message); }
+  };
+}
+
+const chart = $('#levelChart');
+chart.onclick = e => {
+  const i = pickPoint(chart, e);
+  selTs = i >= 0 && rows[i][0] !== selTs ? rows[i][0] : 0;  // tapping the selected dot again deselects it
+  drawCharts();
+};
+chart.onkeydown = e => {
+  const step = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+  if (e.key === 'Escape') { selTs = 0; drawCharts(); return; }
+  if (!step || !rows.length) return;
+  e.preventDefault();
+  const i = selIndex();
+  selTs = rows[Math.max(0, Math.min(rows.length - 1, i < 0 ? rows.length - 1 : i + step))][0];
+  drawCharts();
+};
 
 $('#range').onclick = e => {
   const d = e.target.dataset.days;

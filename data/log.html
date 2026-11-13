@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Measurements</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main>
+  <p class="hint"><a href="setup.html">&larr; Setup</a></p>
+  <div class="card">
+    <div class="chart-head">
+      <h2>Measurements</h2>
+      <div class="seg" id="range">
+        <button data-days="7">7d</button><button data-days="30" class="on">30d</button><button data-days="90">90d</button><button data-days="365">1y</button><button data-days="3650">All</button>
+      </div>
+    </div>
+    <p class="hint">Every logged reading, newest first. Tick the bad ones (test readings, a hand in the tank) and delete
+      them; the graphs and the days-left estimate are recalculated without them. Rows marked
+      <span class="flag">check</span> look wrong: closer than the sensor can see, or a sudden drop no salt use could explain.</p>
+    <div class="actions log-actions">
+      <button class="btn" id="selectFlagged">Select flagged</button>
+      <button class="btn" id="selectNone">Clear selection</button>
+      <button class="btn danger" id="deleteSel" disabled>Delete selected</button>
+      <span class="hint" id="summary"></span>
+    </div>
+    <div class="table-wrap">
+      <table class="log">
+        <thead><tr>
+          <th><input type="checkbox" id="all" aria-label="Select all"></th>
+          <th>Time</th><th class="num">Level</th><th class="num">Change</th><th class="num">Depth</th><th class="num">Distance</th><th class="num">Raw</th><th></th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+<script src="app.js"></script>
+<script>
+renderHeader('log.html');
+let rows = [], units = 'in', days = 30;
+const picked = new Set();
+const focusTs = +new URLSearchParams(location.search).get('ts') || 0;
+if (focusTs) days = 3650;  // opened from the graph: make sure that reading is in range
+
+// Likely-bad readings: closer than the sensor can see (something in the way), or a drop
+// of 15+ points from the last good reading (salt is used slowly; rises are refills).
+let flags = [];
+function computeFlags() {
+  let lastGood = null;
+  flags = rows.map(([, pct, , , dist]) => {
+    const bad = dist < 0 || (lastGood != null && lastGood - pct >= 15);
+    if (!bad) lastGood = pct;
+    return bad;
+  });
+}
+const flagged = i => flags[i];
+
+function render() {
+  const tbody = $('#rows');
+  tbody.innerHTML = '';
+  if (!rows.length) tbody.innerHTML = '<tr><td colspan="8" class="hint">No measurements in this range</td></tr>';
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const [ts, pct, depth, raw, dist] = rows[i];
+    const change = i ? pct - rows[i - 1][1] : null;
+    const tr = document.createElement('tr');
+    tr.dataset.ts = ts;
+    tr.className = `${picked.has(ts) ? 'picked' : ''} ${ts === focusTs ? 'focus' : ''}`;
+    tr.innerHTML = `<td><input type="checkbox" ${picked.has(ts) ? 'checked' : ''} aria-label="Select reading"></td>
+      <td>${fmtTime(ts)}</td><td class="num">${fmtPct(pct)}</td>
+      <td class="num">${change == null ? '' : `${change > 0 ? '+' : ''}${change.toFixed(1)}`}</td>
+      <td class="num">${fmtLen(depth, units)}</td><td class="num">${dist == null ? '--' : fmtLen(dist, units)}</td>
+      <td class="num">${raw}</td><td>${flagged(i) ? '<span class="flag">check</span>' : ''}</td>`;
+    tbody.appendChild(tr);
+  }
+  $('#all').checked = rows.length > 0 && rows.every(r => picked.has(r[0]));
+  $('#deleteSel').disabled = !picked.size;
+  $('#deleteSel').textContent = picked.size ? `Delete ${picked.size} selected` : 'Delete selected';
+  const nFlag = rows.filter((_, i) => flagged(i)).length;
+  $('#summary').textContent = `${rows.length} readings${nFlag ? `, ${nFlag} flagged` : ''}`;
+  if (focusTs) $('tr.focus')?.scrollIntoView({ block: 'center' });
+}
+
+async function load() {
+  rows = await api(`/api/history?days=${days}`);
+  computeFlags();
+  const inRange = new Set(rows.map(r => r[0]));
+  [...picked].forEach(ts => inRange.has(ts) || picked.delete(ts));
+  if (focusTs && inRange.has(focusTs) && !load.done) picked.add(focusTs);
+  load.done = true;
+  render();
+}
+
+$('#rows').onclick = e => {
+  const tr = e.target.closest('tr[data-ts]');
+  if (!tr) return;
+  const ts = +tr.dataset.ts;
+  picked.has(ts) ? picked.delete(ts) : picked.add(ts);
+  render();
+};
+$('#all').onchange = e => { rows.forEach(r => e.target.checked ? picked.add(r[0]) : picked.delete(r[0])); render(); };
+$('#selectFlagged').onclick = () => { rows.forEach((r, i) => flagged(i) && picked.add(r[0])); render(); };
+$('#selectNone').onclick = () => { picked.clear(); render(); };
+$('#deleteSel').onclick = async () => {
+  const n = picked.size;
+  if (!confirm(`Permanently delete ${n} measurement${n > 1 ? 's' : ''}? This can't be undone.`)) return;
+  try {
+    const r = await api('/api/history/delete', { ts: [...picked] });
+    picked.clear();
+    toast(`Deleted ${r.removed} measurement${r.removed === 1 ? '' : 's'}`);
+    await load();
+  } catch (e) { toast(e.message); }
+};
+$('#range').onclick = e => {
+  const d = e.target.dataset.days;
+  if (!d) return;
+  days = +d;
+  $$('#range button').forEach(b => b.classList.toggle('on', b === e.target));
+  load().catch(err => toast(err.message));
+};
+$$('#range button').forEach(b => b.classList.toggle('on', +b.dataset.days === days));
+
+api('/api/status').then(s => { $('#devName').textContent = s.name; units = s.units; })
+  .then(load).catch(e => toast(e.message));
+</script>
+</body>
+</html>

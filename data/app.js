@@ -112,13 +112,15 @@ function drawAxes(c, x0, x1, y0, y1, yFmt, xFmt, xTicks = 5) {
   }
 }
 
-// points: [[unixSeconds, value], ...]
-function drawLineChart(canvas, points, { yMin = 0, yMax = 100, yFmt = v => `${v}%`, threshold } = {}) {
+// points: [[unixSeconds, value], ...]. Each point gets a dot; `selected` (an index) is
+// highlighted. The dots' screen positions are kept on the canvas for pickPoint().
+function drawLineChart(canvas, points, { yMin = 0, yMax = 100, yFmt = v => `${v}%`, threshold, selected = -1 } = {}) {
   const c = setupCanvas(canvas), { ctx, w, h, pad } = c;
+  canvas._dots = [];
   if (points.length < 2) {
     ctx.fillStyle = css('--muted'); ctx.textAlign = 'center';
-    ctx.fillText('Not enough data yet', w / 2, h / 2);
-    return;
+    ctx.fillText(points.length ? 'One measurement so far' : 'Not enough data yet', w / 2, h / 2 - 16);
+    if (!points.length) return;
   }
   const x0 = points[0][0], x1 = points[points.length - 1][0];
   const sx = t => pad.l + (t - x0) / (x1 - x0 || 1) * (w - pad.l - pad.r);
@@ -138,6 +140,39 @@ function drawLineChart(canvas, points, { yMin = 0, yMax = 100, yFmt = v => `${v}
   ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.stroke();
   ctx.lineTo(sx(x1), sy(yMin)); ctx.lineTo(sx(x0), sy(yMin)); ctx.closePath();
   ctx.fillStyle = css('--accent-soft'); ctx.fill();
+
+  // A dot per measurement; smaller when they crowd together.
+  const clampY = v => Math.min(yMax, Math.max(yMin, v));
+  canvas._dots = points.map(([t, v]) => [sx(t), sy(clampY(v))]);
+  const gap = (w - pad.l - pad.r) / Math.max(1, points.length - 1);
+  const r = gap < 5 ? 1.5 : gap < 12 ? 2.5 : 3.5;
+  const surface = css('--surface');
+  ctx.fillStyle = accent; ctx.strokeStyle = surface; ctx.lineWidth = 1;
+  canvas._dots.forEach(([x, y]) => { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); if (r > 2) ctx.stroke(); });
+
+  if (selected >= 0 && selected < points.length) {
+    const [x, y] = canvas._dots[selected];
+    ctx.strokeStyle = accent; ctx.globalAlpha = .35; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fillStyle = css('--accent-soft'); ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = accent; ctx.fill(); ctx.strokeStyle = surface; ctx.lineWidth = 2; ctx.stroke();
+  }
+}
+
+// Index of the dot nearest a pointer event (by x first, as on a time axis), or -1.
+function pickPoint(canvas, e) {
+  const dots = canvas._dots || [];
+  if (!dots.length) return -1;
+  const rect = canvas.getBoundingClientRect();
+  const px = e.clientX - rect.left, py = e.clientY - rect.top;
+  let best = -1, bestD = Infinity;
+  dots.forEach(([x, y], i) => {
+    const d = Math.abs(x - px) * 3 + Math.abs(y - py);
+    if (d < bestD) { bestD = d; best = i; }
+  });
+  return Math.abs(dots[best][0] - px) <= 24 ? best : -1;
 }
 
 // bars: [[label, value], ...]

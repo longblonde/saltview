@@ -143,7 +143,7 @@ static void handleHistory() {
   time_t now = time(nullptr);
   uint32_t since = now >= kValidEpoch ? now - days * 86400UL : 0;
 
-  // Stream [[ts,pct,depthMm,raw],...] in chunks; the file can be hundreds of KB.
+  // Stream [[ts,pct,depthMm,raw,distMm],...] in chunks; the file can be hundreds of KB.
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "application/json", "");
   String buf = "[";
@@ -159,6 +159,8 @@ static void handleHistory() {
     buf += String(r.depthMm, 0);
     buf += ',';
     buf += r.raw;
+    buf += ',';
+    buf += String(r.distMm, 0);
     buf += ']';
     if (buf.length() > 1024) {
       server.sendContent(buf);
@@ -168,6 +170,21 @@ static void handleHistory() {
   buf += ']';
   server.sendContent(buf);
   server.sendContent("");
+}
+
+// {"ts":[1794591517, ...]} -> {"removed":n}; for bad readings (testing, a hand in the tank).
+static void handleHistoryDelete() {
+  JsonDocument body;
+  if (!readBody(body)) return;
+  std::vector<uint32_t> ts;
+  for (JsonVariant v : body["ts"].as<JsonArray>())
+    if (v.is<uint32_t>()) ts.push_back(v.as<uint32_t>());
+  if (ts.empty() || ts.size() > 2000) return server.send(400, "text/plain", "send 1-2000 timestamps in \"ts\"");
+  size_t removed = History::remove(ts);
+  gUsagePerDay = History::usagePctPerDay(14);
+  JsonDocument doc;
+  doc["removed"] = removed;
+  sendJson(200, doc);
 }
 
 static void handleConfigPost() {
@@ -292,8 +309,10 @@ void begin() {
   server.on("/api/history", HTTP_GET, handleHistory);
   server.on("/api/history/clear", HTTP_POST, [] {
     History::clear();
+    gUsagePerDay = NAN;
     ok();
   });
+  server.on("/api/history/delete", HTTP_POST, handleHistoryDelete);
   server.on("/api/config", HTTP_GET, sendConfig);
   server.on("/api/config", HTTP_POST, handleConfigPost);
   server.on("/api/calibrate", HTTP_POST, handleCalibrate);

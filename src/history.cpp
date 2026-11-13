@@ -1,5 +1,6 @@
 #include "history.h"
 #include <LittleFS.h>
+#include <algorithm>
 
 namespace History {
 static const char* kPath = "/history.csv";
@@ -84,6 +85,39 @@ float usagePctPerDay(uint16_t days) {
   });
   float spanDays = (last - first) / 86400.0f;
   return spanDays < 1.0f ? NAN : used / spanDays;
+}
+
+// Rewrites the log without the given rows, via the same temp-file-and-rename as trim(),
+// so a power cut leaves either the old log or the new one.
+size_t remove(const std::vector<uint32_t>& timestamps) {
+  if (timestamps.empty()) return 0;
+  File in = LittleFS.open(kPath, "r");
+  if (!in) return 0;
+  File out = LittleFS.open(kTmpPath, "w");
+  if (!out) return 0;
+  size_t removed = 0;
+  bool ok = true;
+  while (in.available()) {
+    String line = in.readStringUntil('\n');
+    if (line.isEmpty()) continue;
+    uint32_t ts = strtoul(line.c_str(), nullptr, 10);
+    if (std::find(timestamps.begin(), timestamps.end(), ts) != timestamps.end()) {
+      removed++;
+      continue;
+    }
+    line += '\n';
+    if (out.print(line) != line.length()) {
+      ok = false;
+      break;
+    }
+  }
+  in.close();
+  out.close();
+  if (!ok || !removed || !LittleFS.rename(kTmpPath, kPath)) {
+    LittleFS.remove(kTmpPath);  // nothing matched, or the flash write failed: keep the log as it was
+    return 0;
+  }
+  return removed;
 }
 
 void clear() { LittleFS.remove(kPath); }
