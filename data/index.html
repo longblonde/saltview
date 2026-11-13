@@ -45,7 +45,7 @@
     </div>
     <canvas id="levelChart" class="pick" tabindex="0" aria-label="Salt level graph. Select a dot, or use the arrow keys, to see that measurement."></canvas>
     <div class="details" id="pointDetails" hidden></div>
-    <p class="hint" id="pickHint" style="margin:8px 0 0">Select a dot to see that measurement. <a href="log.html">All measurements</a></p>
+    <p class="hint" id="pickHint" style="margin:8px 0 0">Select a dot to see that measurement.</p>
   </div>
 
   <div class="card">
@@ -107,18 +107,7 @@ function showDetails() {
   box.innerHTML = field('Measured', fmtTime(ts)) + field('Salt level', fmtPct(pct)) +
     field('Change from previous', change == null ? 'first reading' : `${change > 0 ? '+' : ''}${change.toFixed(1)} points`) +
     field('Salt depth', fmtLen(depth, u)) + field('Distance to salt', dist == null ? '--' : fmtLen(dist, u)) +
-    field('Raw sensor value', raw) +
-    `<div class="actions"><button class="btn danger" id="delPoint">Delete this measurement</button>
-     <a href="log.html?ts=${ts}">Open in measurements</a> <span class="hint">${i + 1} of ${rows.length}</span></div>`;
-  $('#delPoint').onclick = async () => {
-    if (!confirm(`Permanently delete the ${fmtTime(ts)} measurement (${fmtPct(pct)})? This can't be undone.`)) return;
-    try {
-      await api('/api/history/delete', { ts: [ts] });
-      selTs = rows[i + 1]?.[0] || rows[i - 1]?.[0] || 0;
-      toast('Measurement deleted');
-      await loadStatus(); await loadHistory();
-    } catch (err) { toast(err.message); }
-  };
+    field('Raw sensor value', raw) + field('Reading', `${i + 1} of ${rows.length}`);
 }
 
 const chart = $('#levelChart');

@@ -150,15 +150,19 @@ function drawLineChart(canvas, points, { yMin = 0, yMax = 100, yFmt = v => `${v}
   ctx.fillStyle = accent; ctx.strokeStyle = surface; ctx.lineWidth = 1;
   canvas._dots.forEach(([x, y]) => { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); if (r > 2) ctx.stroke(); });
 
-  if (selected >= 0 && selected < points.length) {
-    const [x, y] = canvas._dots[selected];
-    ctx.strokeStyle = accent; ctx.globalAlpha = .35; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
-    ctx.globalAlpha = 1;
+  // `selected`: one index or an array of them. A single selection also gets a guide line.
+  const sel = (Array.isArray(selected) ? selected : [selected]).filter(i => i >= 0 && i < points.length);
+  sel.forEach(i => {
+    const [x, y] = canvas._dots[i];
+    if (sel.length === 1) {
+      ctx.strokeStyle = accent; ctx.globalAlpha = .35; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
     ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fillStyle = css('--accent-soft'); ctx.fill();
     ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2);
     ctx.fillStyle = accent; ctx.fill(); ctx.strokeStyle = surface; ctx.lineWidth = 2; ctx.stroke();
-  }
+  });
 }
 
 // Index of the dot nearest a pointer event (by x first, as on a time axis), or -1.

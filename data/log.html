@@ -16,7 +16,12 @@
         <button data-days="7">7d</button><button data-days="30" class="on">30d</button><button data-days="90">90d</button><button data-days="365">1y</button><button data-days="3650">All</button>
       </div>
     </div>
-    <p class="hint">Every logged reading, newest first. Tick the bad ones (test readings, a hand in the tank) and delete
+    <canvas id="levelChart" class="pick" tabindex="0" aria-label="Salt level graph. Select dots to select those measurements in the table."></canvas>
+    <p class="hint" style="margin:8px 0 0">Select dots on the graph or rows in the table; both show the same selection.</p>
+  </div>
+
+  <div class="card">
+    <p class="hint">Every logged reading, newest first. Select the bad ones (test readings, a hand in the tank) and delete
       them; the graphs and the days-left estimate are recalculated without them. Rows marked
       <span class="flag">check</span> look wrong: closer than the sensor can see, or a sudden drop no salt use could explain.</p>
     <div class="actions log-actions">
@@ -39,10 +44,9 @@
 <script src="app.js"></script>
 <script>
 renderHeader('log.html');
-let rows = [], units = 'in', days = 30;
+let rows = [], status = null, days = 30;
 const picked = new Set();
-const focusTs = +new URLSearchParams(location.search).get('ts') || 0;
-if (focusTs) days = 3650;  // opened from the graph: make sure that reading is in range
+const chart = $('#levelChart');
 
 // Likely-bad readings: closer than the sensor can see (something in the way), or a drop
 // of 15+ points from the last good reading (salt is used slowly; rises are refills).
@@ -55,31 +59,41 @@ function computeFlags() {
     return bad;
   });
 }
-const flagged = i => flags[i];
+
+// Change from the previous reading: a green + for a rise, a red − for a drop.
+function fmtChange(change) {
+  if (change == null) return '';
+  if (Math.abs(change) < 0.05) return '<span class="hint">0.0</span>';
+  return change > 0 ? `<span class="up">+</span>${change.toFixed(1)}` : `<span class="down">&minus;</span>${(-change).toFixed(1)}`;
+}
+
+function drawChart() {
+  const sel = rows.map((r, i) => picked.has(r[0]) ? i : -1).filter(i => i >= 0);
+  drawLineChart(chart, rows.map(r => [r[0], r[1]]), { threshold: status?.lowPct, selected: sel });
+}
 
 function render() {
-  const tbody = $('#rows');
+  const tbody = $('#rows'), u = status?.units || 'in';
   tbody.innerHTML = '';
   if (!rows.length) tbody.innerHTML = '<tr><td colspan="8" class="hint">No measurements in this range</td></tr>';
   for (let i = rows.length - 1; i >= 0; i--) {
     const [ts, pct, depth, raw, dist] = rows[i];
-    const change = i ? pct - rows[i - 1][1] : null;
     const tr = document.createElement('tr');
     tr.dataset.ts = ts;
-    tr.className = `${picked.has(ts) ? 'picked' : ''} ${ts === focusTs ? 'focus' : ''}`;
+    tr.className = picked.has(ts) ? 'picked' : '';
     tr.innerHTML = `<td><input type="checkbox" ${picked.has(ts) ? 'checked' : ''} aria-label="Select reading"></td>
       <td>${fmtTime(ts)}</td><td class="num">${fmtPct(pct)}</td>
-      <td class="num">${change == null ? '' : `${change > 0 ? '+' : ''}${change.toFixed(1)}`}</td>
-      <td class="num">${fmtLen(depth, units)}</td><td class="num">${dist == null ? '--' : fmtLen(dist, units)}</td>
-      <td class="num">${raw}</td><td>${flagged(i) ? '<span class="flag">check</span>' : ''}</td>`;
+      <td class="num">${fmtChange(i ? pct - rows[i - 1][1] : null)}</td>
+      <td class="num">${fmtLen(depth, u)}</td><td class="num">${dist == null ? '--' : fmtLen(dist, u)}</td>
+      <td class="num">${raw}</td><td>${flags[i] ? '<span class="flag">check</span>' : ''}</td>`;
     tbody.appendChild(tr);
   }
   $('#all').checked = rows.length > 0 && rows.every(r => picked.has(r[0]));
   $('#deleteSel').disabled = !picked.size;
   $('#deleteSel').textContent = picked.size ? `Delete ${picked.size} selected` : 'Delete selected';
-  const nFlag = rows.filter((_, i) => flagged(i)).length;
+  const nFlag = flags.filter(Boolean).length;
   $('#summary').textContent = `${rows.length} readings${nFlag ? `, ${nFlag} flagged` : ''}`;
-  if (focusTs) $('tr.focus')?.scrollIntoView({ block: 'center' });
+  drawChart();
 }
 
 async function load() {
@@ -87,20 +101,40 @@ async function load() {
   computeFlags();
   const inRange = new Set(rows.map(r => r[0]));
   [...picked].forEach(ts => inRange.has(ts) || picked.delete(ts));
-  if (focusTs && inRange.has(focusTs) && !load.done) picked.add(focusTs);
-  load.done = true;
   render();
 }
 
+const toggle = ts => { picked.has(ts) ? picked.delete(ts) : picked.add(ts); render(); };
+
 $('#rows').onclick = e => {
   const tr = e.target.closest('tr[data-ts]');
-  if (!tr) return;
-  const ts = +tr.dataset.ts;
-  picked.has(ts) ? picked.delete(ts) : picked.add(ts);
-  render();
+  if (tr) toggle(+tr.dataset.ts);
+};
+// A dot selects its row too, and scrolls the table to it.
+chart.onclick = e => {
+  const i = pickPoint(chart, e);
+  if (i < 0) return;
+  const ts = rows[i][0];
+  toggle(ts);
+  if (picked.has(ts)) $(`tr[data-ts="${ts}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+};
+// Keyboard: arrows move a cursor along the dots, space or enter selects it.
+let cursor = -1;
+chart.onkeydown = e => {
+  if (!rows.length) return;
+  const step = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+  if (step) {
+    e.preventDefault();
+    cursor = Math.max(0, Math.min(rows.length - 1, cursor < 0 ? rows.length - 1 : cursor + step));
+    drawLineChart(chart, rows.map(r => [r[0], r[1]]), { threshold: status?.lowPct,
+      selected: [...rows.map((r, i) => picked.has(r[0]) ? i : -1).filter(i => i >= 0), cursor] });
+  } else if ((e.key === ' ' || e.key === 'Enter') && cursor >= 0) {
+    e.preventDefault();
+    toggle(rows[cursor][0]);
+  }
 };
 $('#all').onchange = e => { rows.forEach(r => e.target.checked ? picked.add(r[0]) : picked.delete(r[0])); render(); };
-$('#selectFlagged').onclick = () => { rows.forEach((r, i) => flagged(i) && picked.add(r[0])); render(); };
+$('#selectFlagged').onclick = () => { rows.forEach((r, i) => flags[i] && picked.add(r[0])); render(); };
 $('#selectNone').onclick = () => { picked.clear(); render(); };
 $('#deleteSel').onclick = async () => {
   const n = picked.size;
@@ -119,9 +153,9 @@ $('#range').onclick = e => {
   $$('#range button').forEach(b => b.classList.toggle('on', b === e.target));
   load().catch(err => toast(err.message));
 };
-$$('#range button').forEach(b => b.classList.toggle('on', +b.dataset.days === days));
 
-api('/api/status').then(s => { $('#devName').textContent = s.name; units = s.units; })
+window.addEventListener('resize', drawChart);
+api('/api/status').then(s => { status = s; $('#devName').textContent = s.name; })
   .then(load).catch(e => toast(e.message));
 </script>
 </body>

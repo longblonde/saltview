@@ -23,8 +23,10 @@ off again.
 - **Dashboard** (`http://saltview.local`): level, depth, estimated days left, usage per day,
   level-over-time chart (7 d / 30 d / 90 d / 1 y) with a selectable dot per measurement and its
   details underneath, daily usage bars, notification feed.
-- **Measurements** (`log.html`, linked from Setup): every logged reading in a table; likely-bad ones
-  (closer than the sensor can see, or a sudden drop) are flagged, and any can be deleted.
+- **Measurements** (`log.html`, linked from Setup → Measurement): the level graph above a table of
+  every reading, with the change from the previous one (+ green / − red). Select readings by dot or
+  by row; likely-bad ones (closer than the sensor can see, or a sudden drop) are flagged, and any
+  selection can be deleted.
 - **Distance sensing**: trimmed-mean of N samples, converted to distance with a multi-point
   calibration curve (see below), then to % between your tank's empty and full marks.
 - **Calibration / setup page**: live raw readings, capture calibration points, set empty/full marks
