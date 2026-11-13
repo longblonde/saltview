@@ -23,12 +23,13 @@
   <div class="card">
     <p class="hint">Every logged reading, newest first. Select the bad ones (test readings, a hand in the tank) and delete
       them; the graphs and the days-left estimate are recalculated without them. Rows marked
-      <span class="flag">check</span> look wrong: closer than the sensor can see, or a sudden drop no salt use could explain.</p>
+      <span class="flag">check</span> look wrong: closer than the sensor can see, or a sudden drop no salt use could explain.
+      Rows marked <span class="flag refill">refill</span> are a big rise in level, as when salt is added.</p>
     <div class="actions log-actions">
-      <button class="btn" id="selectFlagged">Select flagged</button>
       <button class="btn" id="selectNone">Clear selection</button>
       <button class="btn danger" id="deleteSel" disabled>Delete selected</button>
       <span class="hint" id="summary"></span>
+      <button class="btn flagged" id="selectFlagged">Select flagged</button>
     </div>
     <div class="table-wrap">
       <table class="log">
@@ -49,12 +50,16 @@ const picked = new Set();
 const chart = $('#levelChart');
 
 // Likely-bad readings: closer than the sensor can see (something in the way), or a drop
-// of 15+ points from the last good reading (salt is used slowly; rises are refills).
-let flags = [];
+// of 15+ points from the last good reading (salt is used slowly). A rise of 10+ points
+// (the device's refill threshold) over the last good reading is marked as a refill.
+const REFILL = 10;
+let flags = [], refills = [];
 function computeFlags() {
   let lastGood = null;
-  flags = rows.map(([, pct, , , dist]) => {
+  refills = [];
+  flags = rows.map(([, pct, , , dist], i) => {
     const bad = dist < 0 || (lastGood != null && lastGood - pct >= 15);
+    refills[i] = !bad && lastGood != null && pct - lastGood >= REFILL;
     if (!bad) lastGood = pct;
     return bad;
   });
@@ -85,7 +90,7 @@ function render() {
       <td>${fmtTime(ts)}</td><td class="num">${fmtPct(pct)}</td>
       <td class="num">${fmtChange(i ? pct - rows[i - 1][1] : null)}</td>
       <td class="num">${fmtLen(depth, u)}</td><td class="num">${dist == null ? '--' : fmtLen(dist, u)}</td>
-      <td class="num">${raw}</td><td>${flags[i] ? '<span class="flag">check</span>' : ''}</td>`;
+      <td class="num">${raw}</td><td>${flags[i] ? '<span class="flag">check</span>' : refills[i] ? '<span class="flag refill">refill</span>' : ''}</td>`;
     tbody.appendChild(tr);
   }
   $('#all').checked = rows.length > 0 && rows.every(r => picked.has(r[0]));

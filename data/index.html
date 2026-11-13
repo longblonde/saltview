@@ -45,7 +45,6 @@
     </div>
     <canvas id="levelChart" class="pick" tabindex="0" aria-label="Salt level graph. Select a dot, or use the arrow keys, to see that measurement."></canvas>
     <div class="details" id="pointDetails" hidden></div>
-    <p class="hint" id="pickHint" style="margin:8px 0 0">Select a dot to see that measurement.</p>
   </div>
 
   <div class="card">
@@ -99,7 +98,6 @@ function drawCharts() {
 function showDetails() {
   const i = selIndex(), box = $('#pointDetails');
   box.hidden = i < 0;
-  $('#pickHint').hidden = i >= 0;
   if (i < 0) return;
   const [ts, pct, depth, raw, dist] = rows[i], u = status?.units || 'in';
   const change = i ? pct - rows[i - 1][1] : null;
@@ -116,6 +114,10 @@ chart.onclick = e => {
   selTs = i >= 0 && rows[i][0] !== selTs ? rows[i][0] : 0;  // tapping the selected dot again deselects it
   drawCharts();
 };
+// Clicking anywhere off the graph clears the selection (and hides the details).
+document.addEventListener('click', e => {
+  if (selTs && e.target !== chart && !$('#pointDetails').contains(e.target)) { selTs = 0; drawCharts(); }
+});
 chart.onkeydown = e => {
   const step = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
   if (e.key === 'Escape') { selTs = 0; drawCharts(); return; }

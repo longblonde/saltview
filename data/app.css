@@ -138,6 +138,8 @@ table.log .up { color: var(--ok); }
 table.log .down { color: var(--alert); }
 .log-actions { align-items: center; }
 .flag { font-size: 12px; color: var(--warn); border: 1px solid currentColor; border-radius: 10px; padding: 0 6px; }
+.flag.refill { color: var(--ok); }
+button.btn.flagged { color: var(--warn); border-color: var(--warn); margin-left: auto; }
 
 /* Selected measurement under the level graph */
 canvas.pick { cursor: pointer; }

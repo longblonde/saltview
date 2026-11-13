@@ -126,7 +126,9 @@ function drawLineChart(canvas, points, { yMin = 0, yMax = 100, yFmt = v => `${v}
   const sx = t => pad.l + (t - x0) / (x1 - x0 || 1) * (w - pad.l - pad.r);
   const sy = v => h - pad.b - (v - yMin) / (yMax - yMin) * (h - pad.t - pad.b);
   const spanDays = (x1 - x0) / 86400;
-  const xFmt = t => new Date(t * 1000).toLocaleDateString([], spanDays > 2 ? { month: 'short', day: 'numeric' } : { hour: 'numeric' });
+  const xFmt = t => spanDays > 2
+    ? new Date(t * 1000).toLocaleDateString([], { month: 'short', day: 'numeric' })
+    : new Date(t * 1000).toLocaleTimeString([], { hour: 'numeric', minute: spanDays < 0.25 ? '2-digit' : undefined });
   drawAxes(c, x0, x1, yMin, yMax, yFmt, xFmt);
 
   if (threshold != null) {
@@ -150,18 +152,21 @@ function drawLineChart(canvas, points, { yMin = 0, yMax = 100, yFmt = v => `${v}
   ctx.fillStyle = accent; ctx.strokeStyle = surface; ctx.lineWidth = 1;
   canvas._dots.forEach(([x, y]) => { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); if (r > 2) ctx.stroke(); });
 
-  // `selected`: one index or an array of them. A single selection also gets a guide line.
+  // `selected`: one index or an array of them. Each gets a guide line and a high-contrast dot:
+  // the text colour (white in dark mode, near-black in light) inside an accent ring.
   const sel = (Array.isArray(selected) ? selected : [selected]).filter(i => i >= 0 && i < points.length);
+  ctx.strokeStyle = accent; ctx.globalAlpha = .45; ctx.lineWidth = 1;
+  sel.forEach(i => {
+    const x = canvas._dots[i][0];
+    ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
+  });
+  ctx.globalAlpha = 1;
+  const ink = css('--text');
   sel.forEach(i => {
     const [x, y] = canvas._dots[i];
-    if (sel.length === 1) {
-      ctx.strokeStyle = accent; ctx.globalAlpha = .35; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
-    ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.fillStyle = css('--accent-soft'); ctx.fill();
-    ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2);
-    ctx.fillStyle = accent; ctx.fill(); ctx.strokeStyle = surface; ctx.lineWidth = 2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI * 2); ctx.fillStyle = css('--accent-soft'); ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2);
+    ctx.fillStyle = ink; ctx.fill(); ctx.strokeStyle = accent; ctx.lineWidth = 2.5; ctx.stroke();
   });
 }
 
