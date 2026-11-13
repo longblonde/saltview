@@ -94,21 +94,49 @@ static void evaluateAlerts(const Reading& r) {
   rtcPrevPct = r.pct;
 }
 
-void takeReading(bool log) {
-  Reading r = gSensor.ok() ? gSensor.measure() : Reading();
-  gLast = r;
-  if (log) {
-    time_t t = time(nullptr);
-    rtcLastLogTs = t >= kValidEpoch ? (uint32_t)t : 0;
-    History::append(r);
-    gUsagePerDay = History::usagePctPerDay(14);
-    evaluateAlerts(r);
-  }
+float daysLeftFor(const Reading& r) { return (r.valid() && gUsagePerDay > 0.05f) ? r.pct / gUsagePerDay : NAN; }
+
+static void showOnDisplay(const Reading& r) {
   DisplayData& d = gDisplay.data;
   d.reading = r;
   d.sensorOk = gSensor.ok();
   d.low = r.valid() && r.pct <= gConfig.lowPct;
-  d.daysLeft = (r.valid() && gUsagePerDay > 0.05f) ? r.pct / gUsagePerDay : NAN;
+  d.daysLeft = daysLeftFor(r);
+}
+
+// Unlogged readings (motion wakes, boot) only refresh the display; the dashboard and the
+// alerts follow the log, so deleting a bad row from it removes it everywhere.
+void takeReading(bool log) {
+  Reading r = gSensor.ok() ? gSensor.measure() : Reading();
+  if (log) {
+    time_t t = time(nullptr);
+    rtcLastLogTs = t >= kValidEpoch ? (uint32_t)t : 0;
+    History::append(r);
+    gLast = r;
+    gUsagePerDay = History::usagePctPerDay(14);
+    evaluateAlerts(r);
+  }
+  showOnDisplay(r);
+}
+
+void reloadFromHistory(bool resetAlerts) {
+  History::Row row;
+  gLast = Reading();
+  if (History::last(row)) {
+    gLast.ts = row.ts;
+    gLast.raw = row.raw;
+    gLast.distMm = row.distMm;
+    gLast.depthMm = row.depthMm;
+    gLast.pct = row.pct;
+  }
+  gUsagePerDay = History::usagePctPerDay(14);
+  if (resetAlerts) {
+    // Restart from the newest remaining reading, so a deleted spike can't hold back a
+    // low-salt alert or trigger a false refill notice.
+    rtcPrevPct = gLast.pct;
+    rtcLowLatched = gLast.valid() && gLast.pct <= gConfig.lowPct;
+  }
+  showOnDisplay(gLast);
 }
 
 // Setup mode: the heading scrolls full width, a pause, then the network to join, looping.
@@ -184,7 +212,8 @@ void setup() {
   }
 
   gSensor.begin();
-  gUsagePerDay = History::usagePctPerDay(14);
+  reloadFromHistory(!sFromSleep);  // after a power cycle the RTC alert state is gone: rebuild it from the log
+  if (!sFromSleep) rtcLastLogTs = gLast.ts;  // ...and keep the log schedule, rather than logging on every reboot
   takeReading(false);
 
   // In sleep mode a PIR wake just shows the display, unless a log is also due.

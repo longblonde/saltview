@@ -111,7 +111,7 @@ static void handleStatus() {
   doc["emptyMm"] = gConfig.emptyMm;
   doc["fullMm"] = gConfig.fullMm;
   doc["usagePerDay"] = gUsagePerDay;
-  doc["daysLeft"] = gDisplay.data.daysLeft;
+  doc["daysLeft"] = daysLeftFor(gLast);
   doc["unread"] = Notify::unread();
   doc["displayAwake"] = gDisplay.awake();
   doc["power"] = gConfig.power == PowerMode::DeepSleep ? "sleep" : "on";
@@ -181,7 +181,7 @@ static void handleHistoryDelete() {
     if (v.is<uint32_t>()) ts.push_back(v.as<uint32_t>());
   if (ts.empty() || ts.size() > 2000) return server.send(400, "text/plain", "send 1-2000 timestamps in \"ts\"");
   size_t removed = History::remove(ts);
-  gUsagePerDay = History::usagePctPerDay(14);
+  reloadFromHistory();
   JsonDocument doc;
   doc["removed"] = removed;
   sendJson(200, doc);
@@ -309,7 +309,7 @@ void begin() {
   server.on("/api/history", HTTP_GET, handleHistory);
   server.on("/api/history/clear", HTTP_POST, [] {
     History::clear();
-    gUsagePerDay = NAN;
+    reloadFromHistory();
     ok();
   });
   server.on("/api/history/delete", HTTP_POST, handleHistoryDelete);

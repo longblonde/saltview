@@ -87,6 +87,15 @@ float usagePctPerDay(uint16_t days) {
   return spanDays < 1.0f ? NAN : used / spanDays;
 }
 
+bool last(Row& out) {
+  bool found = false;
+  forEach(0, [&](const Row& r) {
+    out = r;
+    found = true;
+  });
+  return found;
+}
+
 // Rewrites the log without the given rows, via the same temp-file-and-rename as trim(),
 // so a power cut leaves either the old log or the new one.
 size_t remove(const std::vector<uint32_t>& timestamps) {

@@ -17,6 +17,8 @@ void append(const Reading& r);  // skipped if the reading is invalid or has no t
 void forEach(uint32_t since, const std::function<void(const Row&)>& fn);
 // Average salt consumption (% of tank per day) over the last `days`, ignoring refills.
 float usagePctPerDay(uint16_t days);
+// The newest row; false if the log is empty.
+bool last(Row& out);
 // Removes the rows logged at these timestamps; returns how many were removed.
 size_t remove(const std::vector<uint32_t>& timestamps);
 void clear();
