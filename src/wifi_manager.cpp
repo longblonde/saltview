@@ -4,16 +4,21 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
+#include "config.h"
 
 namespace WifiMgr {
 static constexpr uint32_t kConnectTimeoutMs = 30000;
 static constexpr uint8_t kJoinRetries = 2;
 static constexpr uint32_t kPortalTimeoutMs = 10 * 60 * 1000;  // then retry saved network
+static constexpr uint32_t kRejoinEveryMs = 30000;              // after a drop, if the library hasn't managed
+static constexpr uint32_t kRestartAfterLostMs = 15 * 60 * 1000;
 
 static Mode sMode = Mode::Connecting;
 static DNSServer sDns;
-static String sAp, sSsid, sLastError;
+static String sAp, sSsid, sPass, sLastError;
 static uint32_t sPortalSince = 0;
+static uint32_t sLostAt = 0, sLastAttempt = 0;
 static volatile uint8_t sDisconnectReason = 0;
 static volatile bool sAssociated = false;
 
@@ -37,6 +42,52 @@ static const char* reasonText(uint8_t reason) {
     default:
       return "timed out";
   }
+}
+
+static const char* authName(wifi_auth_mode_t m) {
+  switch (m) {
+    case WIFI_AUTH_OPEN: return "open";
+    case WIFI_AUTH_WEP: return "WEP";
+    case WIFI_AUTH_WPA_PSK: return "WPA";
+    case WIFI_AUTH_WPA2_PSK: return "WPA2";
+    case WIFI_AUTH_WPA_WPA2_PSK: return "WPA/WPA2";
+    case WIFI_AUTH_WPA2_ENTERPRISE: return "WPA2-Enterprise";
+    case WIFI_AUTH_WPA3_PSK: return "WPA3";
+    case WIFI_AUTH_WPA2_WPA3_PSK: return "WPA2/WPA3";
+    default: return "other";
+  }
+}
+
+// Logs every access point broadcasting the saved name, so a failed join shows what the board could see.
+static void logVisibleAccessPoints() {
+  int n = WiFi.scanNetworks(false, true);
+  int found = 0;
+  for (int i = 0; i < n; i++) {
+    if (WiFi.SSID(i) != sSsid) continue;
+    found++;
+    Serial.printf("[wifi] sees \"%s\" at %s, channel %d, %d dBm, %s\n", sSsid.c_str(), WiFi.BSSIDstr(i).c_str(),
+                  WiFi.channel(i), WiFi.RSSI(i), authName(WiFi.encryptionType(i)));
+  }
+  if (!found) Serial.printf("[wifi] \"%s\" not visible (%d other networks)\n", sSsid.c_str(), n);
+  WiFi.scanDelete();
+}
+
+static void beginJoin() {
+#ifdef SALTVIEW_TEST_BSSID  // diagnostic builds: join one access point, e.g. -DSALTVIEW_TEST_BSSID=\"aa:bb:cc:dd:ee:ff\"
+  uint8_t bssid[6];
+  sscanf(SALTVIEW_TEST_BSSID, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &bssid[0], &bssid[1], &bssid[2], &bssid[3], &bssid[4],
+         &bssid[5]);
+  WiFi.begin(sSsid.c_str(), sPass.c_str(), 0, bssid);
+#else
+  WiFi.begin(sSsid.c_str(), sPass.c_str());
+#endif
+}
+
+static void join() {
+  WiFi.disconnect();
+  delay(100);
+  beginJoin();
+  sLastAttempt = millis();
 }
 
 static void startPortal() {
@@ -63,7 +114,7 @@ void begin(const String& hostname) {
   Preferences p;
   p.begin("wifi", true);
   sSsid = p.getString("ssid", "");
-  String pass = p.getString("pass", "");
+  sPass = p.getString("pass", "");
   p.end();
 
   if (sSsid.isEmpty()) {
@@ -75,6 +126,7 @@ void begin(const String& hostname) {
       [](WiFiEvent_t, WiFiEventInfo_t info) {
         uint8_t reason = info.wifi_sta_disconnected.reason;
         if (reason != WIFI_REASON_ASSOC_LEAVE) sDisconnectReason = reason;  // our own disconnect() isn't the cause
+        sAssociated = false;
         Serial.printf("[wifi] disconnected, reason %u\n", reason);
       },
       ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
@@ -86,13 +138,36 @@ void begin(const String& hostname) {
       ARDUINO_EVENT_WIFI_STA_CONNECTED);
   // Lengths only, never the password itself: catches stray spaces and autocorrected input.
   Serial.printf("[wifi] joining \"%s\" (ssid %u chars, password %u chars%s)\n", sSsid.c_str(), sSsid.length(),
-                pass.length(), (pass.length() && (isspace(pass[0]) || isspace(pass[pass.length() - 1])))
-                                   ? ", leading/trailing space!"
-                                   : "");
+                sPass.length(), (sPass.length() && (isspace(sPass[0]) || isspace(sPass[sPass.length() - 1])))
+                                    ? ", leading/trailing space!"
+                                    : "");
+  // Our credentials live in our own NVS namespace. Older firmware also let the driver save a copy on
+  // every join; erase that once so no stale driver settings linger, and stop it saving again.
+  WiFi.persistent(false);
   WiFi.setHostname(hostname.c_str());
   WiFi.mode(WIFI_STA);
+  wifi_config_t blank = {};
+  esp_wifi_set_storage(WIFI_STORAGE_FLASH);
+  esp_wifi_set_config(WIFI_IF_STA, &blank);
+  esp_wifi_set_storage(WIFI_STORAGE_RAM);
+  // Scan every channel and pick the strongest access point, not the first one heard.
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+  if (gConfig.power == PowerMode::AlwaysOn) WiFi.setSleep(false);  // USB powered: radio power save only costs reliability
   WiFi.setAutoReconnect(true);
-  WiFi.begin(sSsid.c_str(), pass.c_str());
+  logVisibleAccessPoints();
+  // Join with the factory MAC marked "locally administered" (86:.. instead of 84:..). Some
+  // networks refuse the factory address outright (reason 202); this one is the same on every
+  // boot, so the router still sees one device and the DHCP lease (IP address) stays put.
+  uint8_t staMac[6];
+  esp_read_mac(staMac, ESP_MAC_WIFI_STA);
+  staMac[0] = (staMac[0] & 0xFC) | 0x02;  // locally administered, unicast
+  esp_wifi_set_mac(WIFI_IF_STA, staMac);
+  Serial.printf("[wifi] using MAC %s\n", WiFi.macAddress().c_str());
+#ifdef SALTVIEW_TEST_BSSID
+  Serial.printf("[wifi] TEST: only access point %s\n", SALTVIEW_TEST_BSSID);
+#endif
+  beginJoin();
   uint32_t t0 = millis();
   uint8_t retries = 0;
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < kConnectTimeoutMs) {
@@ -100,9 +175,8 @@ void begin(const String& hostname) {
     if (WiFi.status() == WL_CONNECT_FAILED && retries < kJoinRetries) {
       retries++;
       Serial.printf("[wifi] rejected, retry %u of %u\n", retries, kJoinRetries);
-      WiFi.disconnect();
-      delay(1000);
-      WiFi.begin(sSsid.c_str(), pass.c_str());
+      delay(900);
+      join();
     }
     delay(100);
   }
@@ -121,7 +195,52 @@ void begin(const String& hostname) {
   Serial.printf("[wifi] connected: http://%s  (http://%s.local)\n", ip().c_str(), hostname.c_str());
 }
 
+// The library reconnects by itself only for some disconnect reasons (not, for example, when the
+// router refuses a login), so watch the link and rejoin ourselves until it comes back.
+static void watchStation() {
+  uint32_t now = millis();
+#ifdef SALTVIEW_TEST_HEARTBEAT  // diagnostic builds: link state every 10 s, and whether the router answers
+  static uint32_t lastBeat = 0;
+  if (now - lastBeat >= 10000) {
+    lastBeat = now;
+    WiFiClient probe;
+    bool gw = WiFi.isConnected() && probe.connect(WiFi.gatewayIP(), 80, 1000);
+    probe.stop();
+    Serial.printf("[wifi] beat: status %d, ip %s, ap %s, %d dBm, router %s\n", WiFi.status(),
+                  WiFi.localIP().toString().c_str(), WiFi.BSSIDstr().c_str(), WiFi.RSSI(), gw ? "reachable" : "NOT reachable");
+  }
+#endif
+#ifdef SALTVIEW_TEST_DROP  // diagnostic builds: drop the link once, 60 s in, to exercise the rejoin path
+  static bool dropped = false;
+  if (!dropped && now > 60000 && WiFi.status() == WL_CONNECTED) {
+    dropped = true;
+    Serial.println("[wifi] TEST: dropping the connection");
+    WiFi.disconnect();  // a voluntary leave: the library won't reconnect by itself
+  }
+#endif
+  if (WiFi.status() == WL_CONNECTED) {
+    if (sLostAt) Serial.printf("[wifi] back online after %lus: %s\n", (unsigned long)(now - sLostAt) / 1000, ip().c_str());
+    sLostAt = 0;
+    return;
+  }
+  if (!sLostAt) {
+    sLostAt = sLastAttempt = now;  // give the library's own reconnect a first chance
+    Serial.printf("[wifi] connection lost (reason %u)\n", sDisconnectReason);
+    return;
+  }
+  if (now - sLostAt >= kRestartAfterLostMs) {
+    Serial.println("[wifi] offline too long, restarting");
+    ESP.restart();
+  }
+  if (now - sLastAttempt >= kRejoinEveryMs) {
+    Serial.printf("[wifi] rejoining (offline %lus, last reason %u)\n", (unsigned long)(now - sLostAt) / 1000,
+                  sDisconnectReason);
+    join();
+  }
+}
+
 void loop() {
+  if (sMode == Mode::Station) return watchStation();
   if (sMode != Mode::Portal) return;
   sDns.processNextRequest();
   if (!sSsid.isEmpty() && millis() - sPortalSince > kPortalTimeoutMs) ESP.restart();

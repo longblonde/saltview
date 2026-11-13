@@ -191,6 +191,8 @@ void setup() {
   sOffline = gConfig.power == PowerMode::DeepSleep && pirWake && !logDue();
   if (sOffline) return;
 
+  // Printed late so the USB serial link is up: 1 power-on, 3 software restart, 4 crash, 5-7 watchdog.
+  Serial.printf("[boot] reset reason %d\n", (int)esp_reset_reason());
   if (!gDisplay.awake()) gDisplay.showNow("WIFI");
   WifiMgr::begin(hostname());
   if (WifiMgr::mode() == WifiMgr::Mode::Portal) {
