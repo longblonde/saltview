@@ -74,7 +74,7 @@ function fmtChange(change) {
 
 function drawChart() {
   const sel = rows.map((r, i) => picked.has(r[0]) ? i : -1).filter(i => i >= 0);
-  drawLineChart(chart, rows.map(r => [r[0], r[1]]), { threshold: status?.lowPct, selected: sel });
+  drawLineChart(chart, rows.map(r => [r[0], r[1]]), { threshold: status?.lowPct, selected: sel, ...chartRange(rows, days) });
 }
 
 function render() {
@@ -131,7 +131,7 @@ chart.onkeydown = e => {
   if (step) {
     e.preventDefault();
     cursor = Math.max(0, Math.min(rows.length - 1, cursor < 0 ? rows.length - 1 : cursor + step));
-    drawLineChart(chart, rows.map(r => [r[0], r[1]]), { threshold: status?.lowPct,
+    drawLineChart(chart, rows.map(r => [r[0], r[1]]), { threshold: status?.lowPct, ...chartRange(rows, days),
       selected: [...rows.map((r, i) => picked.has(r[0]) ? i : -1).filter(i => i >= 0), cursor] });
   } else if ((e.key === ' ' || e.key === 'Enter') && cursor >= 0) {
     e.preventDefault();

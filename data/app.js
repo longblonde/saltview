@@ -112,24 +112,79 @@ function drawAxes(c, x0, x1, y0, y1, yFmt, xFmt, xTicks = 5) {
   }
 }
 
-// points: [[unixSeconds, value], ...]. Each point gets a dot; `selected` (an index) is
-// highlighted. The dots' screen positions are kept on the canvas for pickPoint().
-function drawLineChart(canvas, points, { yMin = 0, yMax = 100, yFmt = v => `${v}%`, threshold, selected = -1 } = {}) {
+// Time-axis ticks on calendar boundaries (whole hours, midnights, 1st of the month), spaced so
+// at most `max` fit. Returns [[unixSeconds, label], ...] within [x0, x1].
+function timeTicks(x0, x1, max) {
+  const H = 3600, D = 86400, span = x1 - x0;
+  const steps = [[1, 'h'], [2, 'h'], [3, 'h'], [6, 'h'], [12, 'h'], [1, 'd'], [2, 'd'], [7, 'd'], [14, 'd'],
+    [1, 'm'], [2, 'm'], [3, 'm'], [6, 'm'], [12, 'm']];
+  const len = ([n, u]) => n * (u === 'h' ? H : u === 'd' ? D : 30.44 * D);
+  const [n, unit] = steps.find(s => span / len(s) <= max) || steps[steps.length - 1];
+  const d = new Date(x0 * 1000);
+  d.setMinutes(0, 0, 0);
+  if (unit !== 'h') d.setHours(0);
+  if (unit === 'm') d.setDate(1);
+  // Align to the step: hours of the day, a steady run of days (weeks start on Monday), months of the year.
+  const dayIndex = () => Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / (D * 1000)) - 4;  // 0 = a Monday
+  while (unit === 'h' ? d.getHours() % n : unit === 'd' ? ((dayIndex() % n) + n) % n : d.getMonth() % n) {
+    if (unit === 'h') d.setHours(d.getHours() + 1); else if (unit === 'd') d.setDate(d.getDate() + 1); else d.setMonth(d.getMonth() + 1);
+  }
+  const ticks = [];
+  for (let guard = 0; guard < 400; guard++) {
+    const t = d.getTime() / 1000;
+    if (t > x1) break;
+    if (t >= x0) {
+      let label;
+      if (unit === 'h') label = d.getHours() === 0 ? d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+        : d.toLocaleTimeString([], { hour: 'numeric' });
+      else if (unit === 'd') label = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      else label = d.getMonth() === 0 ? String(d.getFullYear()) : d.toLocaleDateString([], { month: 'short' });
+      ticks.push([t, label]);
+    }
+    if (unit === 'h') d.setHours(d.getHours() + n);
+    else if (unit === 'd') d.setDate(d.getDate() + n);
+    else d.setMonth(d.getMonth() + n);
+  }
+  return ticks;
+}
+
+// points: [[unixSeconds, value], ...] in time order. The x axis spans [from, to] (default: the
+// data), so a fixed range shows where in it the readings fall. Each point gets a dot;
+// `selected` (an index or array) is highlighted. Dot positions are kept for pickPoint().
+function drawLineChart(canvas, points, { yMin = 0, yMax = 100, yFmt = v => `${v}%`, threshold, selected = -1, from, to } = {}) {
   const c = setupCanvas(canvas), { ctx, w, h, pad } = c;
   canvas._dots = [];
-  if (points.length < 2) {
+  if (points.length < 2 && from == null) {
     ctx.fillStyle = css('--muted'); ctx.textAlign = 'center';
     ctx.fillText(points.length ? 'One measurement so far' : 'Not enough data yet', w / 2, h / 2 - 16);
     if (!points.length) return;
   }
-  const x0 = points[0][0], x1 = points[points.length - 1][0];
-  const sx = t => pad.l + (t - x0) / (x1 - x0 || 1) * (w - pad.l - pad.r);
+  const x0 = from ?? points[0][0], x1 = Math.max(to ?? points[points.length - 1][0], x0 + 3600);
+  const sx = t => pad.l + (t - x0) / (x1 - x0) * (w - pad.l - pad.r);
   const sy = v => h - pad.b - (v - yMin) / (yMax - yMin) * (h - pad.t - pad.b);
-  const spanDays = (x1 - x0) / 86400;
-  const xFmt = t => spanDays > 2
-    ? new Date(t * 1000).toLocaleDateString([], { month: 'short', day: 'numeric' })
-    : new Date(t * 1000).toLocaleTimeString([], { hour: 'numeric', minute: spanDays < 0.25 ? '2-digit' : undefined });
-  drawAxes(c, x0, x1, yMin, yMax, yFmt, xFmt);
+  drawAxes(c, x0, x1, yMin, yMax, yFmt, null, -1);
+
+  // Time labels on calendar boundaries with faint gridlines; labels near the edges are
+  // nudged inside the canvas, and any that would collide with the previous one are skipped.
+  ctx.font = '12px system-ui, sans-serif';
+  const ticks = timeTicks(x0, x1, Math.max(2, Math.floor((w - pad.l - pad.r) / 70)));
+  let lastRight = -Infinity;
+  ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+  ticks.forEach(([t, label]) => {
+    const x = sx(t), tw = ctx.measureText(label).width;
+    ctx.strokeStyle = css('--grid'); ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b); ctx.stroke();
+    const left = Math.min(Math.max(x - tw / 2, 2), w - tw - 2);
+    if (left < lastRight + 8) return;
+    ctx.fillStyle = css('--muted');
+    ctx.fillText(label, left, h - pad.b + 6);
+    lastRight = left + tw;
+  });
+  if (!points.length) {
+    ctx.fillStyle = css('--muted'); ctx.textAlign = 'center';
+    ctx.fillText('No measurements in this range', (pad.l + w - pad.r) / 2, h / 2 - 16);
+    return;
+  }
 
   if (threshold != null) {
     ctx.strokeStyle = css('--alert'); ctx.setLineDash([4, 4]);
@@ -140,13 +195,13 @@ function drawLineChart(canvas, points, { yMin = 0, yMax = 100, yFmt = v => `${v}
   ctx.beginPath();
   points.forEach(([t, v], i) => i ? ctx.lineTo(sx(t), sy(v)) : ctx.moveTo(sx(t), sy(v)));
   ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.stroke();
-  ctx.lineTo(sx(x1), sy(yMin)); ctx.lineTo(sx(x0), sy(yMin)); ctx.closePath();
+  ctx.lineTo(sx(points[points.length - 1][0]), sy(yMin)); ctx.lineTo(sx(points[0][0]), sy(yMin)); ctx.closePath();
   ctx.fillStyle = css('--accent-soft'); ctx.fill();
 
   // A dot per measurement; smaller when they crowd together.
   const clampY = v => Math.min(yMax, Math.max(yMin, v));
   canvas._dots = points.map(([t, v]) => [sx(t), sy(clampY(v))]);
-  const gap = (w - pad.l - pad.r) / Math.max(1, points.length - 1);
+  const dots = canvas._dots, gap = dots.length > 1 ? (dots[dots.length - 1][0] - dots[0][0]) / (dots.length - 1) : 99;
   const r = gap < 5 ? 1.5 : gap < 12 ? 2.5 : 3.5;
   const surface = css('--surface');
   ctx.fillStyle = accent; ctx.strokeStyle = surface; ctx.lineWidth = 1;
@@ -168,6 +223,13 @@ function drawLineChart(canvas, points, { yMin = 0, yMax = 100, yFmt = v => `${v}
     ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2);
     ctx.fillStyle = ink; ctx.fill(); ctx.strokeStyle = accent; ctx.lineWidth = 2.5; ctx.stroke();
   });
+}
+
+// The x-axis span for a range of `days` ending now; "All" (3650) starts at the first reading.
+function chartRange(rows, days) {
+  const now = Math.max(Date.now() / 1000, rows.length ? rows[rows.length - 1][0] : 0);
+  const from = days >= 3650 && rows.length ? Math.min(rows[0][0], now - 86400) : now - days * 86400;
+  return { from, to: now };
 }
 
 // Index of the dot nearest a pointer event (by x first, as on a time axis), or -1.

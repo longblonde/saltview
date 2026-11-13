@@ -90,7 +90,8 @@ async function loadHistory() {
 const selIndex = () => rows.findIndex(r => r[0] === selTs);
 
 function drawCharts() {
-  drawLineChart($('#levelChart'), rows.map(r => [r[0], r[1]]), { threshold: status?.lowPct, selected: selIndex() });
+  drawLineChart($('#levelChart'), rows.map(r => [r[0], r[1]]),
+    { threshold: status?.lowPct, selected: selIndex(), ...chartRange(rows, days) });
   showDetails();
   drawBarChart($('#usageChart'), dailyUsage(rows), { yFmt: v => `${v.toFixed(0)}%` });
 }
